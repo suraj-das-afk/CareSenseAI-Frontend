@@ -1,6 +1,6 @@
 # CareSense AI – Frontend
 
-CareSense AI is an AI-powered healthcare assistant that helps users analyze symptoms and get possible conditions, medicine suggestions, and doctor recommendations.
+CareSense AI is an intelligent health-tech platform that leverages AI to analyze user-reported symptoms, provide potential condition insights, recommend medications, and connect users with relevant doctors for faster and more accessible healthcare.
 
 ## 🚀 Features
 - Symptom input and analysis interface
@@ -27,7 +27,21 @@ Backend is private for security purposes.
 - Wearable device integration
 
 ## 📸 Screenshots
-(Add screenshots here later)
+
+### 🏠 Home Screen
+![Home](screenshots/home.png)
+
+### 🔍 Search
+![Search](screenshots/search.png)
+
+### 👨‍⚕️ Doctors
+![Doctors](screenshots/doctor.png)
+
+### 🤖 AI Symptom Checker
+![Checker](screenshots/checker.png)
+
+### ⚙️ Settings
+![Settings](screenshots/settings.png)
 
 ## 👨‍💻 Developer
 Suraj Das
