@@ -40,7 +40,7 @@ Backend is private for security purposes.
 ![Home](screenshorts/Home.jpg)
 
 ### 🔍 Search
-![Search](screenshots/Search.jpg)
+![Search](screenshorts/Search.jpg)
 
 ### 👨‍⚕️ Doctors
 ![Doctors](screenshorts/Doctor.jpg)
