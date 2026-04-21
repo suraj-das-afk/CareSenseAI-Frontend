@@ -46,7 +46,7 @@ Backend is private for security purposes.
 ![Doctors](screenshorts/Doctor.jpg)
 
 ### 🤖 AI Symptom Checker
-![Checker](screenshots/Checker.jpg)
+![Checker](screenshorts/Checker.jpg)
 
 ### ⚙️ Settings
 ![Settings](screenshots/Settings.jpg)
