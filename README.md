@@ -43,7 +43,7 @@ Backend is private for security purposes.
 ![Search](screenshots/Search.jpg)
 
 ### 👨‍⚕️ Doctors
-![Doctors](screenshots/Doctor.jpg)
+![Doctors](screenshorts/Doctor.jpg)
 
 ### 🤖 AI Symptom Checker
 ![Checker](screenshots/Checker.jpg)
