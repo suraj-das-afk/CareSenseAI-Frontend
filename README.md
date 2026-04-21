@@ -14,17 +14,25 @@ CareSense AI is an intelligent health-tech platform that leverages AI to analyze
 - JavaScript
 - Firebase (For Login/Sign-up)
 
+## 🧠 Architecture
+- Component-based structure using React Native
+- Context API for state management (Auth, Popup handling)
+- Modular folder structure (screens, components, hooks)
+- Designed for scalable backend API integration
+
 ## 📱 Project Status
 Currently in development (MVP stage)
 
 ## 🔐 Backend
 Backend is private for security purposes.
 
-## 🔮 Future Plans
-- Video consultation with doctors
-- Digital prescriptions
-- AI health tracking system
-- Wearable device integration
+## 🚀 Features
+- AI-powered symptom analysis interface
+- Condition prediction with severity classification (Low, Moderate, Critical)
+- Medicine recommendation system (UI)
+- Doctor discovery with ratings, availability, and booking interface
+- Emergency assistance integration (112 quick access)
+- Clean, modern, and responsive mobile UI
 
 ## 📸 Screenshots
 
@@ -32,16 +40,20 @@ Backend is private for security purposes.
 ![Home](screenshorts/Home.jpg)
 
 ### 🔍 Search
-![Search](screenshots/search.jpg)
+![Search](screenshots/Search.jpg)
 
 ### 👨‍⚕️ Doctors
-![Doctors](screenshots/doctor.jpg)
+![Doctors](screenshots/Doctor.jpg)
 
 ### 🤖 AI Symptom Checker
-![Checker](screenshots/checker.jpg)
+![Checker](screenshots/Checker.jpg)
 
 ### ⚙️ Settings
-![Settings](screenshots/settings.jpg)
+![Settings](screenshots/Settings.jpg)
+
+
+## 🎯 Vision
+CareSense AI aims to bridge the gap between users and accessible healthcare by leveraging AI to provide instant, intelligent, and affordable health guidance.
 
 ## 👨‍💻 Developer
 Suraj Das
