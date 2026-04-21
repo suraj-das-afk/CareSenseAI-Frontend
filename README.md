@@ -29,19 +29,19 @@ Backend is private for security purposes.
 ## 📸 Screenshots
 
 ### 🏠 Home Screen
-![Home](screenshots/home.png)
+![Home](screenshorts/Home.jpg)
 
 ### 🔍 Search
-![Search](screenshots/search.png)
+![Search](screenshots/search.jpg)
 
 ### 👨‍⚕️ Doctors
-![Doctors](screenshots/doctor.png)
+![Doctors](screenshots/doctor.jpg)
 
 ### 🤖 AI Symptom Checker
-![Checker](screenshots/checker.png)
+![Checker](screenshots/checker.jpg)
 
 ### ⚙️ Settings
-![Settings](screenshots/settings.png)
+![Settings](screenshots/settings.jpg)
 
 ## 👨‍💻 Developer
 Suraj Das
