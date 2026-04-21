@@ -49,7 +49,7 @@ Backend is private for security purposes.
 ![Checker](screenshorts/Checker.jpg)
 
 ### ⚙️ Settings
-![Settings](screenshots/Settings.jpg)
+![Settings](screenshorts/Setting.jpg)
 
 
 ## 🎯 Vision
