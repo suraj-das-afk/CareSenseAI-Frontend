@@ -1,0 +1,65 @@
+# ==============================
+# Environment & Secrets
+# ==============================
+.env
+.env.*
+!.env.example
+
+# Firebase / Google credentials
+firebase-admin.json
+firebase-admin*.json
+service-account*.json
+google-credentials*.json
+*-firebase-adminsdk-*.json
+
+# ==============================
+# Node / npm
+# ==============================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==============================
+# Expo
+# ==============================
+.expo/
+.expo-shared/
+dist/
+web-build/
+
+# ==============================
+# Android
+# ==============================
+android/.gradle/
+android/build/
+android/app/build/
+android/.idea/
+
+# ==============================
+# iOS
+# ==============================
+ios/Pods/
+ios/build/
+
+# ==============================
+# IDE
+# ==============================
+.vscode/
+.idea/
+
+# ==============================
+# OS
+# ==============================
+.DS_Store
+Thumbs.db
+
+# Android generated/signing files
+android/app/debug.keystore
+android/app/debug/
+android/app/build/
+android/build/
+android/.gradle/
+*.apk
+*.aab
