@@ -1,393 +1,88 @@
-import React from 'react';
-
-import {
-  StyleSheet,
-  useColorScheme,
-  useWindowDimensions,
-} from 'react-native';
-
-import {
-  createBottomTabNavigator,
-} from '@react-navigation/bottom-tabs';
-
+import React, { useContext } from 'react';
+import { StyleSheet, useWindowDimensions } from 'react-native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
+import { AuthContext } from '../context/AuthContext';
 import HomeScreen from '../screens/HomeScreen';
 import SearchScreen from '../screens/SearchScreen';
 import AppointmentsScreen from '../screens/AppointmentsScreen';
 import SettingsScreen from '../screens/SettingsScreen';
 
-
-/* ============================================================
-   TAB NAVIGATOR
-============================================================ */
-
-const Tab =
-  createBottomTabNavigator();
-
-
-/* ============================================================
-   COLORS
-============================================================ */
-
-const ACTIVE_COLOR =
-  '#2166F3';
-
-
-/* ============================================================
-   MAIN TABS
-============================================================ */
+const Tab = createBottomTabNavigator();
 
 export default function MainTabs() {
+  const { isDarkMode } = useContext(AuthContext);
+  const { width } = useWindowDimensions();
 
-  const isDark =
-    useColorScheme() === 'dark';
+  const activeColor = '#00D4C5';
+  const background = isDarkMode ? '#141C29' : '#FFFFFF';
+  const border = isDarkMode ? '#222E40' : '#E2E8F0';
+  const inactive = isDarkMode ? '#8897AE' : '#64748B';
 
-  const { width } =
-    useWindowDimensions();
-
-
-  /* ==========================================================
-     THEME
-  ========================================================== */
-
-  const background =
-    isDark
-      ? '#171717'
-      : '#FFFFFF';
-
-  const border =
-    isDark
-      ? '#303030'
-      : '#E0E0E0';
-
-  const inactive =
-    isDark
-      ? '#A0A0A0'
-      : '#777777';
-
-
-  /* ==========================================================
-     RESPONSIVE HORIZONTAL POSITION
-  ========================================================== */
-
-  const horizontalMargin =
-    width <= 360
-      ? 16
-      : width <= 390
-        ? 20
-        : 28;
-
-
-  /* ==========================================================
-     NAVIGATION
-  ========================================================== */
+  const horizontalMargin = width <= 360 ? 16 : width <= 390 ? 20 : 28;
 
   return (
     <Tab.Navigator
-
-      screenOptions={({
-        route,
-      }) => ({
-
-        /* ----------------------------------------------
-           HEADER
-        ---------------------------------------------- */
-
+      screenOptions={({ route }) => ({
         headerShown: false,
-
-
-        /* ----------------------------------------------
-           KEYBOARD
-        ---------------------------------------------- */
-
-        tabBarHideOnKeyboard:
-          true,
-
-
-        /* ----------------------------------------------
-           COLORS
-        ---------------------------------------------- */
-
-        tabBarActiveTintColor:
-          ACTIVE_COLOR,
-
-        tabBarInactiveTintColor:
-          inactive,
-
-
-        /* ----------------------------------------------
-           LABEL
-        ---------------------------------------------- */
-
+        tabBarHideOnKeyboard: true,
+        tabBarActiveTintColor: activeColor,
+        tabBarInactiveTintColor: inactive,
         tabBarShowLabel: true,
-
-
-        /* ----------------------------------------------
-           BAR
-        ---------------------------------------------- */
-
         tabBarStyle: [
           styles.tabBar,
-
           {
-            left:
-              horizontalMargin,
-
-            right:
-              horizontalMargin,
-
-            backgroundColor:
-              background,
-
-            borderColor:
-              border,
+            left: horizontalMargin,
+            right: horizontalMargin,
+            backgroundColor: background,
+            borderColor: border,
           },
         ],
-
-
-        /* ----------------------------------------------
-           ITEMS
-        ---------------------------------------------- */
-
-        tabBarItemStyle:
-          styles.tabItem,
-
-
-        /* ----------------------------------------------
-           LABEL STYLE
-        ---------------------------------------------- */
-
-        tabBarLabelStyle:
-          styles.tabLabel,
-
-
-        /* ----------------------------------------------
-           ICON
-        ---------------------------------------------- */
-
-        tabBarIcon: ({
-          focused,
-          color,
-        }) => {
-
+        tabBarItemStyle: styles.tabItem,
+        tabBarLabelStyle: styles.tabLabel,
+        tabBarIcon: ({ focused, color }) => {
           let iconName;
+          if (route.name === 'Home') iconName = focused ? 'home' : 'home-outline';
+          else if (route.name === 'Search') iconName = focused ? 'search' : 'search-outline';
+          else if (route.name === 'Appointments') iconName = focused ? 'calendar' : 'calendar-outline';
+          else iconName = focused ? 'settings' : 'settings-outline';
 
-
-          /* HOME */
-
-          if (
-            route.name ===
-            'Home'
-          ) {
-            iconName =
-              focused
-                ? 'home'
-                : 'home-outline';
-          }
-
-
-          /* SEARCH */
-
-          else if (
-            route.name ===
-            'Search'
-          ) {
-            iconName =
-              focused
-                ? 'search'
-                : 'search-outline';
-          }
-
-
-          /* APPOINTMENTS */
-
-          else if (
-            route.name ===
-            'Appointments'
-          ) {
-            iconName =
-              focused
-                ? 'calendar'
-                : 'calendar-outline';
-          }
-
-
-          /* SETTINGS */
-
-          else {
-            iconName =
-              focused
-                ? 'settings'
-                : 'settings-outline';
-          }
-
-
-          return (
-            <Ionicons
-              name={iconName}
-              size={27}
-              color={color}
-            />
-          );
+          return <Ionicons name={iconName} size={24} color={color} />;
         },
-
       })}
-
     >
-
-
-      {/* ==================================================
-          HOME
-      ================================================== */}
-
-      <Tab.Screen
-        name="Home"
-        component={
-          HomeScreen
-        }
-        options={{
-          tabBarLabel: 'Home',
-        }}
-      />
-
-
-      {/* ==================================================
-          SEARCH
-      ================================================== */}
-
-      <Tab.Screen
-        name="Search"
-        component={
-          SearchScreen
-        }
-        options={{
-          tabBarLabel: 'Search',
-        }}
-      />
-
-
-      {/* ==================================================
-          APPOINTMENTS
-      ================================================== */}
-
-      <Tab.Screen
-        name="Appointments"
-        component={
-          AppointmentsScreen
-        }
-        options={{
-          tabBarLabel:
-            'Appointments',
-        }}
-      />
-
-
-      {/* ==================================================
-          SETTINGS
-      ================================================== */}
-
-      <Tab.Screen
-        name="Settings"
-        component={
-          SettingsScreen
-        }
-        options={{
-          tabBarLabel:
-            'Settings',
-        }}
-      />
-
+      <Tab.Screen name="Home" component={HomeScreen} options={{ tabBarLabel: 'Home' }} />
+      <Tab.Screen name="Search" component={SearchScreen} options={{ tabBarLabel: 'Search' }} />
+      <Tab.Screen name="Appointments" component={AppointmentsScreen} options={{ tabBarLabel: 'Appointments' }} />
+      <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarLabel: 'Settings' }} />
     </Tab.Navigator>
   );
 }
 
-
-/* ============================================================
-   STYLES
-============================================================ */
-
-const styles =
-  StyleSheet.create({
-
-    /* ========================================================
-       FLOATING TAB BAR
-    ======================================================== */
-
-    tabBar: {
-
-      position:
-        'absolute',
-
-      /*
-       * Lower than before.
-       * This makes the bar visually centered
-       * with the Android gesture/navigation area.
-       */
-
-      bottom: 8,
-
-      height: 76,
-
-      borderRadius: 26,
-
-      borderWidth: 2,
-
-      paddingTop: 3,
-
-      paddingBottom: 3,
-
-      paddingHorizontal: 2,
-
-      elevation: 8,
-
-      shadowColor:
-        '#000',
-
-      shadowOffset: {
-        width: 0,
-        height: 4,
-      },
-
-      shadowOpacity: 0.18,
-
-      shadowRadius: 10,
-    },
-
-
-    /* ========================================================
-       TAB ITEM
-    ======================================================== */
-
-    tabItem: {
-
-      justifyContent:
-        'center',
-
-      alignItems:
-        'center',
-
-      paddingTop: 0,
-
-      paddingBottom: 0,
-
-    },
-
-
-    /* ========================================================
-       TAB LABEL
-    ======================================================== */
-
-    tabLabel: {
-
-      fontSize: 11,
-
-      lineHeight: 15,
-
-      fontWeight: '500',
-
-      marginTop: 0,
-
-    },
-
-  });
+const styles = StyleSheet.create({
+  tabBar: {
+    position: 'absolute',
+    bottom: 14,
+    height: 66,
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingTop: 4,
+    paddingBottom: 4,
+    paddingHorizontal: 2,
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+  },
+  tabItem: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tabLabel: {
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 0,
+  },
+});

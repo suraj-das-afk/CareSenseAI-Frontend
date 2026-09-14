@@ -5,7 +5,7 @@ import * as Sharing from 'expo-sharing';
 import { auth } from '../config/firebase';
 
 const API_URL = Platform.OS === 'android'
-  ? 'http://10.182.194.80:8000/api/'
+  ? 'http://10.151.61.80:8000/api/'
   : 'http://127.0.0.1:8000/api/';
 
 const api = axios.create({
