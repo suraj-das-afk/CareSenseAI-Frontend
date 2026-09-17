@@ -245,90 +245,258 @@ function StepEntry({ symptoms, setSymptoms, onAnalyze, loading }) {
   );
 }
 
-// ─── Step 2: Clarifying Questions Screen ──────────────────────────────────
+// ─── Step 2: Adaptive Clarifying Question Screen ─────────────────────────────
 function StepClarify({ data, symptoms, onSubmit, loading }) {
-  const [answers, setAnswers] = useState({});
+  const question = data?.question || null;
+  const progress = data?.progress || {};
+  const knownStates = data?.known_states || {};
 
-  const answer = (questionId, option) =>
-    setAnswers(prev => ({ ...prev, [questionId]: option }));
+  const [selectedAnswer, setSelectedAnswer] = useState(null);
 
-  const allAnswered = data.questions.every(q => answers[q.id]);
+  const options = question?.options || [
+    'Yes',
+    'No',
+    'Not sure',
+    'Skip',
+  ];
+
+  const handleAnswer = (option) => {
+    setSelectedAnswer(option);
+  };
+
+  const handleContinue = () => {
+    if (!question || !selectedAnswer) return;
+
+    onSubmit({
+      [question.id]: selectedAnswer,
+    });
+  };
+
+  if (!question) {
+    return (
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={styles.stepContainer}
+      >
+        <View style={styles.stepHeader}>
+          <View style={styles.stepBadge}>
+            <Text style={styles.stepBadgeText}>
+              2 of 2
+            </Text>
+          </View>
+
+          <Text style={styles.stepTitle}>
+            Analysis complete
+          </Text>
+
+          <Text style={styles.stepSubtitle}>
+            We have enough information to continue with your assessment.
+          </Text>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  const answered = progress.answered || 0;
+  const maximum = progress.maximum_recommended || 5;
 
   return (
-    <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.stepContainer}>
-      {/* Possible conditions banner */}
-      <View style={styles.possibleBanner}>
-        <Text style={styles.possibleTitle}>Possible Causes of "{symptoms}"</Text>
-        <View style={styles.possibleList}>
-          {(data.possible_conditions || []).map((cond, i) => (
-            <View key={i} style={styles.possibleItem}>
-              <Ionicons name="ellipse" size={6} color="#60a5fa" />
-              <Text style={styles.possibleText}>{cond}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-
+    <ScrollView
+      style={{ flex: 1, backgroundColor: '#0f172a' }}
+      contentContainerStyle={styles.stepContainer}
+      keyboardShouldPersistTaps="handled"
+    >
+      {/* Header */}
       <View style={styles.stepHeader}>
         <View style={styles.stepBadge}>
-          <Text style={styles.stepBadgeText}>2 of 2</Text>
+          <Text style={styles.stepBadgeText}>
+            Follow-up {Math.min(answered + 1, maximum)} of {maximum}
+          </Text>
         </View>
-        <Text style={styles.stepTitle}>A few quick questions</Text>
-        <Text style={styles.stepSubtitle}>{data.message}</Text>
+
+        <Text style={styles.stepTitle}>
+          A quick follow-up
+        </Text>
+
+        <Text style={styles.stepSubtitle}>
+          This question is selected based on the symptoms and answers you
+          have already provided.
+        </Text>
       </View>
 
-      {/* Red flag warning */}
-      {data.red_flags && data.red_flags.length > 0 && (
+      {/* Progress */}
+      <View style={styles.progressCard}>
+        <View style={styles.progressHeader}>
+          <Text style={styles.progressLabel}>
+            Question progress
+          </Text>
+
+          <Text style={styles.progressValue}>
+            {answered}/{maximum}
+          </Text>
+        </View>
+
+        <View style={styles.progressTrack}>
+          <View
+            style={[
+              styles.progressFill,
+              {
+                width: `${Math.min(
+                  (answered / maximum) * 100,
+                  100
+                )}%`,
+              },
+            ]}
+          />
+        </View>
+      </View>
+
+      {/* Danger notice */}
+      {question.danger && (
         <View style={styles.redFlagCard}>
-          <Ionicons name="warning" size={16} color="#ef4444" />
+          <Ionicons
+            name="warning"
+            size={17}
+            color="#ef4444"
+          />
+
           <Text style={styles.redFlagText}>
-            Go to ER immediately if you have:{' '}
-            <Text style={{ fontWeight: 'bold' }}>{data.red_flags.slice(0, 3).join(', ')}</Text>
+            This question checks for symptoms that may require urgent
+            medical attention. Answer as accurately as you can.
           </Text>
         </View>
       )}
 
-      {/* Questions */}
-      {(data.questions || []).map((q, qi) => (
-        <View key={q.id} style={styles.questionCard}>
-          <Text style={styles.questionText}>
-            <Text style={styles.questionNum}>Q{qi + 1}. </Text>{q.text}
-          </Text>
-          <View style={styles.optionsWrap}>
-            {q.options.map(opt => {
-              const selected = answers[q.id] === opt;
-              return (
-                <TouchableOpacity
-                  key={opt}
-                  style={[styles.optionBtn, selected && styles.optionSelected]}
-                  onPress={() => answer(q.id, opt)}
-                >
-                  <View style={[styles.optionRadio, selected && styles.optionRadioSelected]}>
-                    {selected && <View style={styles.optionRadioDot} />}
-                  </View>
-                  <Text style={[styles.optionText, selected && styles.optionTextSelected]}>
-                    {opt}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-      ))}
+      {/* Question */}
+      <View style={styles.questionCard}>
+        <Text style={styles.questionLabel}>
+          QUESTION
+        </Text>
 
+        <Text style={styles.questionText}>
+          {question.text}
+        </Text>
+
+        <View style={styles.optionsWrap}>
+          {options.map((option) => {
+            const selected = selectedAnswer === option;
+
+            return (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.optionBtn,
+                  selected && styles.optionSelected,
+                ]}
+                onPress={() => handleAnswer(option)}
+                disabled={loading}
+                activeOpacity={0.8}
+              >
+                <View
+                  style={[
+                    styles.optionRadio,
+                    selected &&
+                      styles.optionRadioSelected,
+                  ]}
+                >
+                  {selected && (
+                    <View style={styles.optionRadioDot} />
+                  )}
+                </View>
+
+                <Text
+                  style={[
+                    styles.optionText,
+                    selected &&
+                      styles.optionTextSelected,
+                  ]}
+                >
+                  {option}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      {/* Known state summary */}
+      {(knownStates.absent?.length > 0 ||
+        knownStates.unknown?.length > 0 ||
+        knownStates.skipped?.length > 0) && (
+        <View style={styles.stateCard}>
+          <Text style={styles.stateCardTitle}>
+            Your previous answers are being considered
+          </Text>
+
+          {knownStates.absent?.length > 0 && (
+            <Text style={styles.stateCardText}>
+              Denied: {knownStates.absent
+                .map((item) =>
+                  item.replace(/_/g, ' ')
+                )
+                .join(', ')}
+            </Text>
+          )}
+
+          {knownStates.unknown?.length > 0 && (
+            <Text style={styles.stateCardText}>
+              Not sure: {knownStates.unknown
+                .map((item) =>
+                  item.replace(/_/g, ' ')
+                )
+                .join(', ')}
+            </Text>
+          )}
+
+          {knownStates.skipped?.length > 0 && (
+            <Text style={styles.stateCardText}>
+              Skipped: {knownStates.skipped
+                .map((item) =>
+                  item.replace(/_/g, ' ')
+                )
+                .join(', ')}
+            </Text>
+          )}
+        </View>
+      )}
+
+      {/* Continue */}
       <TouchableOpacity
-        style={[styles.primaryBtn, (!allAnswered || loading) && styles.btnDisabled]}
-        onPress={() => onSubmit(answers)}
-        disabled={!allAnswered || loading}
+        style={[
+          styles.primaryBtn,
+          (!selectedAnswer || loading) &&
+            styles.btnDisabled,
+        ]}
+        onPress={handleContinue}
+        disabled={!selectedAnswer || loading}
       >
-        {loading
-          ? <ActivityIndicator color="#fff" />
-          : <>
-              <Ionicons name="checkmark-circle" size={18} color="#fff" />
-              <Text style={styles.primaryBtnText}>Get My Analysis</Text>
-            </>
-        }
+        {loading ? (
+          <ActivityIndicator color="#fff" />
+        ) : (
+          <>
+            <Ionicons
+              name={
+                selectedAnswer === 'Skip'
+                  ? 'play-forward'
+                  : 'arrow-forward-circle'
+              }
+              size={18}
+              color="#fff"
+            />
+
+            <Text style={styles.primaryBtnText}>
+              {selectedAnswer === 'Skip'
+                ? 'Skip Question'
+                : 'Continue'}
+            </Text>
+          </>
+        )}
       </TouchableOpacity>
+
+      <Text style={styles.disclaimer}>
+        You can choose Skip or Not sure at any time. CareSense AI is a
+        decision-support tool and does not provide a diagnosis.
+      </Text>
     </ScrollView>
   );
 }
@@ -337,49 +505,112 @@ function StepClarify({ data, symptoms, onSubmit, loading }) {
 // ─── Main Wrapper ─────────────────────────────────────────────────────────
 export default function SymptomCheckerScreen({ navigation }) {
   const { user } = useContext(AuthContext);
-  const [step, setStep]           = useState('entry');   // 'entry' | 'clarify'
-  const [symptoms, setSymptoms]   = useState('');
-  const [loading, setLoading]     = useState(false);
+  const [step, setStep] = useState('entry');
+  const [symptoms, setSymptoms] = useState('');
+  const [loading, setLoading] = useState(false);
   const [clarifyData, setClarifyData] = useState(null);
+  const [clarifications, setClarifications] = useState({});
 
   const handleInitialAnalyze = async () => {
     if (!symptoms.trim()) return;
+
     setLoading(true);
+
     try {
-      const data = await submitSymptoms(symptoms, user?.uid || 'anonymous');
+      // Always send only the user's original symptom description.
+      const data = await submitSymptoms(
+        symptoms.trim(),
+        user?.uid || 'anonymous',
+        {},
+        {}
+      );
 
       if (data.needs_clarification) {
-        setClarifyData(data.clarification_data);
+        setClarifyData(
+          data.clarification_data || {}
+        );
+
+        setClarifications({});
+
         setStep('clarify');
       } else {
-        navigation.navigate('HealthRecordDetail', { result: data });
+        navigation.navigate(
+          'HealthRecordDetail',
+          { result: data }
+        );
       }
-    } catch {
-      Alert.alert('Connection Error', 'Unable to reach CareSense AI server. Check backend is running.');
+    } catch (error) {
+      console.error(
+        'Initial symptom analysis failed:',
+        error
+      );
+
+      Alert.alert(
+        'Connection Error',
+        'Unable to reach CareSense AI server. Check that the backend is running.'
+      );
     } finally {
       setLoading(false);
     }
   };
 
-  const handleClarifySubmit = async (answers) => {
-    setLoading(true);
-    try {
-      // Build an enriched, clinically phrased symptom string from the answers
-      // so Gemini NLP normalises it correctly into multiple symptoms.
-      const answerPhrases = Object.values(answers).filter(Boolean);
-      const enrichedSymptoms = [symptoms, ...answerPhrases].join(', ');
-      const data = await submitSymptoms(
-        enrichedSymptoms,
-        user?.uid || 'anonymous',
-        answers  // pass raw answers dict too for the Gemini explainer
+  const handleClarifySubmit = async (answer) => {
+  if (!answer || !Object.keys(answer).length) {
+    return;
+  }
+
+  setLoading(true);
+
+  try {
+    // Preserve every previous answer.
+    const updatedClarifications = {
+      ...clarifications,
+      ...answer,
+    };
+
+    setClarifications(
+      updatedClarifications
+    );
+
+    // IMPORTANT:
+    // Send the ORIGINAL symptoms unchanged.
+    // Answers travel separately as structured data.
+    const data = await submitSymptoms(
+      symptoms.trim(),
+      user?.uid || 'anonymous',
+      updatedClarifications,
+      {}
+    );
+
+    if (data.needs_clarification) {
+      setClarifyData(
+        data.clarification_data || {}
       );
-      navigation.navigate('HealthRecordDetail', { result: data });
-    } catch {
-      Alert.alert('Error', 'Analysis failed. Please try again.');
-    } finally {
-      setLoading(false);
+
+      // Stay on the clarification screen.
+      // StepClarify resets its local selected answer
+      // for the newly returned question.
+      setStep('clarify');
+    } else {
+      navigation.navigate(
+        'HealthRecordDetail',
+        { result: data }
+      );
     }
-  };
+  } catch (error) {
+    console.error(
+      'Clarification submission failed:',
+      error
+    );
+
+    Alert.alert(
+      'Error',
+      'Analysis failed. Please try again.'
+    );
+  } finally {
+    setLoading(false);
+  }
+};
 
   return (
     <KeyboardAvoidingView 
@@ -506,4 +737,76 @@ const styles = StyleSheet.create({
   optionRadioDot:     { width: 8, height: 8, borderRadius: 4, backgroundColor: '#3b82f6' },
   optionText:         { color: '#94a3b8', fontSize: 14, flex: 1 },
   optionTextSelected: { color: '#f1f5f9' },
+
+    progressCard: {
+    backgroundColor: '#1e293b',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+
+  progressHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+
+  progressLabel: {
+    color: '#94a3b8',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+
+  progressValue: {
+    color: '#60a5fa',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  progressTrack: {
+    height: 6,
+    backgroundColor: '#0f172a',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+
+  progressFill: {
+    height: 6,
+    backgroundColor: '#2563eb',
+    borderRadius: 4,
+  },
+
+  questionLabel: {
+    color: '#60a5fa',
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 1,
+    marginBottom: 8,
+  },
+
+  stateCard: {
+    backgroundColor: '#172033',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#293548',
+  },
+
+  stateCardTitle: {
+    color: '#cbd5e1',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+
+  stateCardText: {
+    color: '#64748b',
+    fontSize: 11,
+    lineHeight: 18,
+    marginTop: 3,
+  },
 });

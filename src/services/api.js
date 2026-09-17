@@ -64,7 +64,6 @@ export const deleteRecord = async (recordId) => {
   }
 };
 
-/** Download an authenticated PDF to temporary app storage, then open its share sheet. */
 export const openPDFReport = async (recordId) => {
   const user = auth.currentUser;
   if (!user) {
@@ -95,7 +94,6 @@ export const openPDFReport = async (recordId) => {
   return result.uri;
 };
 
-/** Fetch doctor dashboard data */
 export const getDashboard = async (days = 7, userId = '') => {
   try {
     void userId;
@@ -104,6 +102,19 @@ export const getDashboard = async (days = 7, userId = '') => {
   } catch (error) {
     console.error('Dashboard Error:', error);
     throw error;
+  }
+};
+
+// ==========================================
+// NEW: Added missing getDoctors endpoint
+// ==========================================
+export const getDoctors = async (params = {}) => {
+  try {
+    const response = await api.get('doctors/', { params });
+    return response.data;
+  } catch (error) {
+    console.error('Get Doctors Error:', error);
+    throw error; 
   }
 };
 

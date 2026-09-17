@@ -1,6 +1,6 @@
 import React, { useContext } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createStackNavigator, TransitionPresets } from '@react-navigation/stack';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { AuthContext } from '../context/AuthContext';
 
@@ -19,7 +19,7 @@ import DoctorsScreen from '../screens/DoctorsScreen';
 import BookAppointmentScreen from '../screens/BookAppointmentScreen';
 import MedicationScreen from '../screens/MedicationScreen';
 
-const Stack = createNativeStackNavigator();
+const Stack = createStackNavigator();
 
 export default function AppNavigator() {
   const { user, loading, isDarkMode, isAppLocked, authenticateBiometricsManually } = useContext(AuthContext);
@@ -44,7 +44,7 @@ export default function AppNavigator() {
           <Ionicons name="lock-closed" size={48} color="#00D4C5" />
         </View>
         <Text style={[styles.lockTitle, { color: isDarkMode ? '#FFFFFF' : '#111827' }]}>
-          VitaSync Protected
+          CareSense AI Protected
         </Text>
         <Text style={[styles.lockSub, { color: isDarkMode ? '#8897AE' : '#64748B' }]}>
           Biometric verification required to access your medical records.
@@ -60,11 +60,12 @@ export default function AppNavigator() {
   return (
     <Stack.Navigator
       screenOptions={{
-        headerStyle: { backgroundColor: headerBackground },
+        headerStyle: { backgroundColor: headerBackground, elevation: 0, shadowOpacity: 0 },
         headerTintColor: headerText,
-        headerShadowVisible: false,
         headerTitleStyle: { fontWeight: '700', color: headerText },
-        contentStyle: { backgroundColor: screenBackground },
+        cardStyle: { backgroundColor: screenBackground },
+        // Smooth slide & fade animation across transitions
+        ...TransitionPresets.SlideFromRightIOS,
       }}
     >
       {user == null ? (

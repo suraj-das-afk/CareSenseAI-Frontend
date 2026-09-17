@@ -10,19 +10,20 @@ import {
   useColorScheme,
   useWindowDimensions,
   Animated,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { AuthContext } from '../context/AuthContext';
-import { getRecords } from '../services/api'; // Ensure this endpoint returns the mixed data needed
+import { getRecords } from '../services/api';
 
 /* ============================================================
    COLORS & THEMES
 ============================================================ */
 
-const BRAND = { cyan: '#00D4C5', blue: '#2166F3', red: '#EF1023', yellow: '#F59E0B' };
+const BRAND = { cyan: '#00D4C5', blue: '#2166F3', red: '#EF1023', yellow: '#F59E0B', green: '#10B981' };
 
 const getTheme = (isDark) => ({
   background: isDark ? '#0A0F1A' : '#F8F9FB',
@@ -41,7 +42,7 @@ const TRIAGE_CONFIG = {
   EMERGENCY: { color: BRAND.red, label: 'Emergency' },
   URGENT: { color: BRAND.yellow, label: 'Urgent' },
   WARNING: { color: BRAND.yellow, label: 'Warning' },
-  ROUTINE: { color: BRAND.cyan, label: 'Routine' },
+  ROUTINE: { color: BRAND.green, label: 'Routine' },
 };
 
 const QUICK_ACTIONS = [
@@ -52,7 +53,7 @@ const QUICK_ACTIONS = [
 ];
 
 /* ============================================================
-   COMPONENTS
+   MEMOIZED COMPONENTS
 ============================================================ */
 
 const ActionCard = memo(({ action, theme, width, onPress }) => (
@@ -71,7 +72,7 @@ const ActionCard = memo(({ action, theme, width, onPress }) => (
     <View style={styles.actionIconRow}>
       <Ionicons name={action.icon} size={24} color={theme.cyanAccent} />
       {action.hasAI && (
-        <View style={styles.aiBadge}>
+        <View style={[styles.aiBadge, { backgroundColor: theme.cyanAccent }]}>
           <Text style={styles.aiBadgeText}>AI</Text>
         </View>
       )}
@@ -96,96 +97,93 @@ export default function HomeScreen({ navigation }) {
 
   // Real-Time States
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [recentRecords, setRecentRecords] = useState([]);
   const [healthStats, setHealthStats] = useState([]);
   const [todaysSchedule, setTodaysSchedule] = useState([]);
   const [upcomingConsult, setUpcomingConsult] = useState(null);
-  const [vitaSyncScore, setVitaSyncScore] = useState(82);
+  const [careSenseScore, setCareSenseScore] = useState(null);
 
   // Responsive Grid
   const actionCardWidth = (width - 40 - 12) / 2;
-  const displayName = user?.displayName || user?.name || user?.email?.split('@')[0] || 'Suraj';
-  const avatarLetter = (displayName?.trim()?.charAt(0) || 'S').toUpperCase();
+  const displayName = user?.displayName || user?.name || user?.email?.split('@')[0] || 'User';
+  const avatarLetter = (displayName?.trim()?.charAt(0) || 'U').toUpperCase();
 
   /* ==========================================================
      FETCH REAL-TIME DASHBOARD DATA
   ========================================================== */
-  const fetchDashboardData = useCallback(async () => {
+  const fetchDashboardData = useCallback(async (isPullToRefresh = false) => {
+    if (!isPullToRefresh) setLoading(true);
+    
     try {
-      // setLoading(true); // Uncomment if you want skeleton loaders
-      
       const data = await getRecords(user?.uid || 'anonymous');
       
-      // 1. Parse Recent Logs
-      let records = Array.isArray(data) ? data : (data?.records || data?.data || []);
-      records = [...records].sort((a, b) => new Date(b?.createdAt || 0) - new Date(a?.createdAt || 0)).slice(0, 3);
-      setRecentRecords(records);
+      // Parse Recent Logs safely
+      const fetchedRecords = Array.isArray(data) ? data : (data?.records || data?.data || []);
+      const sortedRecords = [...fetchedRecords]
+        .sort((a, b) => new Date(b?.createdAt || b?.created_at || 0) - new Date(a?.createdAt || a?.created_at || 0))
+        .slice(0, 3);
+      setRecentRecords(sortedRecords);
 
-      // 2. Parse Health Stats (Replace with real API fields from your data object)
-      setHealthStats(data?.healthStats || [
-        { value: '72', label: 'Heart Rate', status: 'Normal' },
-        { value: '120/80', label: 'BP', status: 'Optimal' },
-        { value: '7h 23m', label: 'Sleep', status: 'Good' },
-        { value: '8,432', label: 'Steps', status: 'Goal' },
-      ]);
-
-      // 3. Parse Schedule (Replace with real API fields)
-      setTodaysSchedule(data?.schedule || [
-        { id: '1', name: 'Lisinopril', dosage: '10mg', time: '08:00 AM', status: 'Taken' },
-        { id: '2', name: 'Atorvastatin', dosage: '20mg', time: '09:30 AM', status: 'Taken' },
-        { id: '3', name: 'Omega-3', dosage: '1000mg', time: '01:00 PM', status: 'Pending' },
-      ]);
-
-      // 4. Parse Upcoming Consult (Replace with real API fields)
-      setUpcomingConsult(data?.upcomingConsult || {
-        doctor: 'Dr. Sarah Chen',
-        specialty: 'Cardiologist',
-        time: 'tomorrow 10:30 AM',
-        avatar: 'https://i.pravatar.cc/150?img=32'
-      });
-
-      setVitaSyncScore(data?.score || 82);
+      // Parse Dynamic Stats, Schedule, Consult & Score (No fake data fallbacks)
+      setHealthStats(Array.isArray(data?.healthStats) ? data.healthStats : []);
+      setTodaysSchedule(Array.isArray(data?.schedule) ? data.schedule : []);
+      setUpcomingConsult(data?.upcomingConsult || null);
+      
+      // Allow score to be 0, but null if missing
+      setCareSenseScore(typeof data?.score === 'number' ? data.score : null);
 
     } catch (error) {
-      console.log('Dashboard Fetch Error:', error);
+      console.error('Dashboard Fetch Error:', error);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [user?.uid]);
 
-  // Trigger animations & fetch on screen focus
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchDashboardData(true);
+  }, [fetchDashboardData]);
+
   useFocusEffect(
     useCallback(() => {
-      // 1. Fetch real data
       fetchDashboardData();
 
-      // 2. Play smooth enter animation
       fadeAnim.setValue(0);
       slideAnim.setValue(15);
-      Animated.parallel([
+      
+      const animation = Animated.parallel([
         Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
         Animated.timing(slideAnim, { toValue: 0, duration: 450, useNativeDriver: true }),
-      ]).start();
+      ]);
       
-      return () => {
-        // Optional: Reset animation states on unfocus
-      };
+      animation.start();
+      
+      // Cleanup animation on unmount
+      return () => animation.stop();
     }, [fetchDashboardData, fadeAnim, slideAnim])
   );
 
   const openAction = useCallback(route => navigation.navigate(route), [navigation]);
   
-  const getTriage = (record) => {
-    const level = String(record?.triage_level || record?.severity || 'URGENT').toUpperCase();
-    return TRIAGE_CONFIG[level] || TRIAGE_CONFIG.URGENT;
-  };
+  const getTriage = useCallback((record) => {
+    // Default to Routine if missing to avoid false alarms
+    const level = String(record?.triage_level || record?.severity || 'ROUTINE').toUpperCase();
+    return TRIAGE_CONFIG[level] || TRIAGE_CONFIG.ROUTINE;
+  }, []);
 
-  const getCondition = (record) => record?.condition || record?.log || 'Analysis complete';
+  const getCondition = useCallback((record) => record?.condition || record?.log || record?.title || 'Symptom Log', []);
   
-  const getDate = (record) => {
-    const date = new Date(record?.created_at || record?.time || Date.now());
-    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
-  };
+  const getDate = useCallback((record) => {
+    const dateStr = record?.created_at || record?.createdAt || record?.time;
+    if (!dateStr) return 'Recently';
+    
+    const date = new Date(dateStr);
+    return isNaN(date.getTime()) 
+      ? 'Recently' 
+      : date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  }, []);
 
   return (
     <SafeAreaView edges={['top']} style={[styles.safeArea, { backgroundColor: theme.background }]}>
@@ -193,8 +191,10 @@ export default function HomeScreen({ navigation }) {
         style={[styles.container, { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }]}
         contentContainerStyle={[styles.content, { paddingBottom: 130 }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.cyanAccent} />
+        }
       >
-        
         {/* ================= HEADER ================= */}
         <View style={styles.header}>
           <View style={styles.headerTextContainer}>
@@ -210,29 +210,35 @@ export default function HomeScreen({ navigation }) {
           </View>
         </View>
 
-        {/* ================= VITASYNC SCORE ================= */}
-        <View style={[styles.vitaSyncCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        {/* ================= CARESENSE AI SCORE ================= */}
+        <View style={[styles.careSenseCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
           <View style={[styles.scoreCircle, { borderColor: theme.cyanAccent }]}>
-            <Text style={[styles.scoreText, { color: theme.textPrimary }]}>{vitaSyncScore}</Text>
+            <Text style={[styles.scoreText, { color: theme.textPrimary }]}>
+              {careSenseScore !== null ? careSenseScore : '--'}
+            </Text>
           </View>
-          <View style={styles.vitaSyncInfo}>
-            <Text style={[styles.vitaSyncTitle, { color: theme.textPrimary }]}>VitaSync Score</Text>
-            <Text style={[styles.vitaSyncDesc, { color: theme.textSecondary }]}>
-              Your health parameters are looking consistent this week.
+          <View style={styles.careSenseInfo}>
+            <Text style={[styles.careSenseTitle, { color: theme.textPrimary }]}>CareSense AI Score</Text>
+            <Text style={[styles.careSenseDesc, { color: theme.textSecondary }]}>
+              {careSenseScore !== null 
+                ? 'Your health parameters are looking consistent this week.' 
+                : 'Log symptoms or records to generate your health score.'}
             </Text>
           </View>
         </View>
 
         {/* ================= HEALTH STATS ================= */}
-        <View style={styles.statsRow}>
-          {healthStats.map((stat, idx) => (
-            <View key={idx} style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-              <Text style={[styles.statValue, { color: theme.cyanAccent }]}>{stat.value}</Text>
-              <Text style={[styles.statLabel, { color: theme.textSecondary }]}>{stat.label}</Text>
-              <Text style={[styles.statStatus, { color: theme.textSecondary }]}>{stat.status}</Text>
-            </View>
-          ))}
-        </View>
+        {healthStats.length > 0 && (
+          <View style={styles.statsRow}>
+            {healthStats.map((stat, idx) => (
+              <View key={idx} style={[styles.statCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <Text style={[styles.statValue, { color: theme.cyanAccent }]}>{stat.value}</Text>
+                <Text style={[styles.statLabel, { color: theme.textSecondary }]}>{stat.label}</Text>
+                <Text style={[styles.statStatus, { color: theme.textSecondary }]}>{stat.status}</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* ================= QUICK ACTIONS ================= */}
         <Text style={[styles.sectionTitle, { color: theme.textPrimary }]}>Quick Actions</Text>
@@ -248,7 +254,13 @@ export default function HomeScreen({ navigation }) {
             <Text style={[styles.sectionTitle, { color: theme.textPrimary, marginTop: 12 }]}>Upcoming Consult</Text>
             <View style={[styles.consultCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <View style={styles.consultTop}>
-                <Image source={{ uri: upcomingConsult.avatar }} style={styles.doctorAvatar} />
+                {upcomingConsult.avatar ? (
+                  <Image source={{ uri: upcomingConsult.avatar }} style={styles.doctorAvatar} />
+                ) : (
+                  <View style={[styles.doctorAvatarPlaceholder, { backgroundColor: theme.background }]}>
+                    <Ionicons name="person" size={24} color={theme.cyanAccent} />
+                  </View>
+                )}
                 <View style={styles.doctorInfo}>
                   <Text style={[styles.doctorName, { color: theme.textPrimary }]}>{upcomingConsult.doctor}</Text>
                   <Text style={[styles.doctorSpecialty, { color: theme.textSecondary }]}>
@@ -264,33 +276,36 @@ export default function HomeScreen({ navigation }) {
         )}
 
         {/* ================= TODAY'S SCHEDULE ================= */}
-        {todaysSchedule.length > 0 && (
-          <>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: theme.textPrimary, marginBottom: 0 }]}>Today's Schedule</Text>
-              <TouchableOpacity onPress={() => openAction('Medication')}>
-                <Text style={[styles.seeTimelineText, { color: theme.cyanAccent }]}>See timeline</Text>
-              </TouchableOpacity>
-            </View>
-            
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scheduleScroll}>
-              {todaysSchedule.map((item, idx) => (
-                <View key={item.id || idx} style={[styles.scheduleCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                  <Text style={[styles.medName, { color: theme.textPrimary }]}>{item.name}</Text>
-                  <Text style={[styles.medDosage, { color: theme.textSecondary }]}>{item.dosage} • {item.time}</Text>
-                  <View style={[
-                    styles.statusBadge, 
-                    { backgroundColor: item.status === 'Taken' ? (isDark ? '#0F2930' : '#E6FBFA') : theme.background }
-                  ]}>
-                    <Text style={[
-                      styles.statusText, 
-                      { color: item.status === 'Taken' ? theme.cyanAccent : theme.textSecondary }
-                    ]}>{item.status}</Text>
-                  </View>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={[styles.sectionTitle, { color: theme.textPrimary, marginBottom: 0 }]}>Today's Schedule</Text>
+          <TouchableOpacity onPress={() => openAction('Medication')}>
+            <Text style={[styles.seeTimelineText, { color: theme.cyanAccent }]}>See timeline</Text>
+          </TouchableOpacity>
+        </View>
+        
+        {todaysSchedule.length > 0 ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.scheduleScroll}>
+            {todaysSchedule.map((item, idx) => (
+              <View key={item.id || idx} style={[styles.scheduleCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                <Text style={[styles.medName, { color: theme.textPrimary }]} numberOfLines={1}>{item.name}</Text>
+                <Text style={[styles.medDosage, { color: theme.textSecondary }]}>{item.dosage} • {item.time}</Text>
+                <View style={[
+                  styles.statusBadge, 
+                  { backgroundColor: item.status === 'Taken' ? (isDark ? '#0F2930' : '#E6FBFA') : theme.background }
+                ]}>
+                  <Text style={[
+                    styles.statusText, 
+                    { color: item.status === 'Taken' ? theme.cyanAccent : theme.textSecondary }
+                  ]}>{item.status || 'Pending'}</Text>
                 </View>
-              ))}
-            </ScrollView>
-          </>
+              </View>
+            ))}
+          </ScrollView>
+        ) : (
+          <View style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.border, marginBottom: 28 }]}>
+            <Ionicons name="calendar-outline" size={32} color={theme.border} />
+            <Text style={[styles.emptyText, { color: theme.textSecondary }]}>No medications scheduled for today.</Text>
+          </View>
         )}
 
         {/* ================= RECENT LOGS ================= */}
@@ -308,8 +323,11 @@ export default function HomeScreen({ navigation }) {
             <ActivityIndicator size="large" color={theme.cyanAccent} style={{ marginTop: 20 }} />
           ) : recentRecords.length === 0 ? (
             <View style={[styles.emptyCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-              <Ionicons name="pulse-outline" size={32} color={theme.textSecondary} />
+              <Ionicons name="pulse-outline" size={36} color={theme.border} />
               <Text style={[styles.emptyText, { color: theme.textSecondary }]}>No recent activity found.</Text>
+              <TouchableOpacity style={{ marginTop: 12 }} onPress={() => openAction('SymptomChecker')}>
+                <Text style={[styles.seeTimelineText, { color: theme.cyanAccent }]}>+ Log a symptom</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             recentRecords.map((record, index) => {
@@ -359,12 +377,12 @@ const styles = StyleSheet.create({
   avatarCircle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
   avatarText: { fontSize: 18, fontWeight: 'bold' },
 
-  vitaSyncCard: { flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 16, borderWidth: 1, marginBottom: 20 },
+  careSenseCard: { flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 16, borderWidth: 1, marginBottom: 20 },
   scoreCircle: { width: 68, height: 68, borderRadius: 34, borderWidth: 6, borderRightColor: 'transparent', borderBottomColor: 'transparent', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-45deg' }] },
   scoreText: { fontSize: 22, fontWeight: 'bold', transform: [{ rotate: '45deg' }] },
-  vitaSyncInfo: { flex: 1, marginLeft: 16 },
-  vitaSyncTitle: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
-  vitaSyncDesc: { fontSize: 13, lineHeight: 18 },
+  careSenseInfo: { flex: 1, marginLeft: 16 },
+  careSenseTitle: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
+  careSenseDesc: { fontSize: 13, lineHeight: 18 },
 
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 28 },
   statCard: { width: '23%', paddingVertical: 12, paddingHorizontal: 4, borderRadius: 12, borderWidth: 1, alignItems: 'center' },
@@ -378,13 +396,14 @@ const styles = StyleSheet.create({
   actionGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 20 },
   actionCard: { borderRadius: 14, borderWidth: 1, padding: 16, minHeight: 100, justifyContent: 'space-between' },
   actionIconRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 },
-  aiBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 },
-  aiBadgeText: { color: '#111827', fontSize: 10, fontWeight: 'bold' },
+  aiBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  aiBadgeText: { color: '#0A0F1A', fontSize: 10, fontWeight: 'bold' },
   actionText: { fontSize: 14, fontWeight: '600' },
 
   consultCard: { borderRadius: 16, borderWidth: 1, padding: 16, marginBottom: 28 },
   consultTop: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   doctorAvatar: { width: 48, height: 48, borderRadius: 24, marginRight: 12 },
+  doctorAvatarPlaceholder: { width: 48, height: 48, borderRadius: 24, marginRight: 12, alignItems: 'center', justifyContent: 'center' },
   doctorInfo: { flex: 1 },
   doctorName: { fontSize: 16, fontWeight: '700', marginBottom: 4 },
   doctorSpecialty: { fontSize: 13 },

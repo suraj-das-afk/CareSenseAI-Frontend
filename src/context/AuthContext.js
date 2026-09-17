@@ -11,7 +11,7 @@ import {
 } from 'firebase/auth';
 import { auth } from '../config/firebase';
 
-const STORAGE_KEY = '@vitasync_user_settings_v2';
+const STORAGE_KEY = '@caresense_user_settings_v2';
 
 export const AuthContext = createContext();
 
@@ -78,9 +78,10 @@ export const AuthProvider = ({ children }) => {
         if (hasHardware && isEnrolled) {
           setIsAppLocked(true);
           const result = await LocalAuthentication.authenticateAsync({
-            promptMessage: 'Authenticate to access VitaSync Health',
-            fallbackLabel: 'Use Device Passcode',
+            promptMessage: 'CareSense AI Protected',
+            subtitle: 'Authenticate to access CareSense AI',
             cancelLabel: 'Cancel',
+            fallbackLabel: 'Enter password',
             disableDeviceFallback: false,
           });
 
@@ -97,7 +98,8 @@ export const AuthProvider = ({ children }) => {
   const authenticateBiometricsManually = async () => {
     try {
       const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'Authenticate to access VitaSync Health',
+        promptMessage: 'CareSense AI Protected',
+        subtitle: 'Authenticate to access CareSense AI',
         fallbackLabel: 'Use Device Passcode',
         cancelLabel: 'Cancel',
       });

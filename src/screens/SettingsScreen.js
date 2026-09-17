@@ -21,7 +21,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { AuthContext } from '../context/AuthContext';
 
-const STORAGE_KEY = '@vitasync_user_settings_v2';
+const STORAGE_KEY = '@caresense_user_settings_v1';
 
 const BRAND = {
   cyan: '#00D4C5',
@@ -52,14 +52,12 @@ const getTheme = (isDark) => ({
 
 export default function SettingsScreen({ navigation }) {
   const authContext = useContext(AuthContext) || {};
-  const { user, logout, toggleGlobalTheme, isDarkMode: globalDarkMode } = authContext;
+  const { user, logout } = authContext;
   
+  // Directly bind theme to system device settings
   const systemColorScheme = useColorScheme();
-  const [darkTheme, setDarkTheme] = useState(
-    globalDarkMode !== undefined ? globalDarkMode : systemColorScheme === 'dark'
-  );
-
-  const theme = useMemo(() => getTheme(darkTheme), [darkTheme]);
+  const isDark = systemColorScheme === 'dark';
+  const theme = useMemo(() => getTheme(isDark), [isDark]);
 
   // Persistent States
   const [profileImage, setProfileImage] = useState(user?.photoURL || 'https://i.pravatar.cc/300?img=11');
@@ -95,7 +93,7 @@ export default function SettingsScreen({ navigation }) {
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(20)).current;
 
-  // 1. LOAD SETTINGS FROM STORAGE ON MOUNT
+  // Load Settings from AsyncStorage
   useEffect(() => {
     const loadSavedSettings = async () => {
       try {
@@ -109,10 +107,6 @@ export default function SettingsScreen({ navigation }) {
           if (parsed.notifications !== undefined) setNotifications(parsed.notifications);
           if (parsed.biometrics !== undefined) setBiometrics(parsed.biometrics);
           if (parsed.dataSharing !== undefined) setDataSharing(parsed.dataSharing);
-          if (parsed.darkTheme !== undefined) {
-            setDarkTheme(parsed.darkTheme);
-            if (toggleGlobalTheme) toggleGlobalTheme(parsed.darkTheme);
-          }
         }
       } catch (e) {
         console.error('Failed to load local settings:', e);
@@ -121,7 +115,7 @@ export default function SettingsScreen({ navigation }) {
     loadSavedSettings();
   }, []);
 
-  // 2. HELPER TO SAVE SETTINGS
+  // Persist Settings
   const persistSettings = async (updatedValues) => {
     try {
       const payload = {
@@ -130,7 +124,6 @@ export default function SettingsScreen({ navigation }) {
         devices,
         emergencyContacts,
         notifications,
-        darkTheme,
         biometrics,
         dataSharing,
         ...updatedValues,
@@ -176,13 +169,6 @@ export default function SettingsScreen({ navigation }) {
     } catch (err) {
       Alert.alert('Error', 'Unable to pick image. Please verify expo-image-picker is installed.');
     }
-  };
-
-  // Dark Theme Toggle
-  const handleDarkThemeToggle = (value) => {
-    setDarkTheme(value);
-    if (toggleGlobalTheme) toggleGlobalTheme(value);
-    persistSettings({ darkTheme: value });
   };
 
   // Vitals Saver
@@ -275,9 +261,9 @@ export default function SettingsScreen({ navigation }) {
               <Ionicons name="camera" size={14} color="#0A0F1A" />
             </View>
           </TouchableOpacity>
-          <Text style={[styles.userName, { color: theme.textPrimary }]}>{user?.name || 'Suraj Das'}</Text>
+          <Text style={[styles.userName, { color: theme.textPrimary }]}>{user?.name || 'User'}</Text>
           <Text style={[styles.userEmail, { color: theme.textSecondary }]}>
-            {user?.email || 'suraj.das@vitasync.io'}
+            {user?.email || 'user@caresense.ai'}
           </Text>
         </View>
 
@@ -335,7 +321,7 @@ export default function SettingsScreen({ navigation }) {
           devices.map((device) => (
             <View key={device.id} style={[styles.deviceCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
               <View style={styles.deviceLeft}>
-                <View style={[styles.deviceIconBg, { backgroundColor: darkTheme ? '#0F2930' : '#E6FBFA' }]}>
+                <View style={[styles.deviceIconBg, { backgroundColor: isDark ? '#0F2930' : '#E6FBFA' }]}>
                   <Ionicons name="watch-outline" size={24} color={theme.accent} />
                 </View>
                 <View style={styles.deviceInfo}>
@@ -355,6 +341,21 @@ export default function SettingsScreen({ navigation }) {
         <View style={styles.settingsGroup}>
           <View style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <View style={styles.settingTextContainer}>
+              <Text style={[styles.settingTitle, { color: theme.textPrimary }]}>Biometric Authentication</Text>
+              <Text style={[styles.settingSub, { color: theme.textSecondary }]}>Secure CareSense AI with Fingerprint & FaceID</Text>
+            </View>
+            <Switch
+              value={biometrics}
+              onValueChange={(val) => {
+                setBiometrics(val);
+                persistSettings({ biometrics: val });
+              }}
+              trackColor={{ false: theme.switchTrackInactive, true: theme.switchTrackActive }}
+            />
+          </View>
+
+          <View style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={styles.settingTextContainer}>
               <Text style={[styles.settingTitle, { color: theme.textPrimary }]}>Notifications</Text>
               <Text style={[styles.settingSub, { color: theme.textSecondary }]}>Alerts, meds & reminders</Text>
             </View>
@@ -363,33 +364,6 @@ export default function SettingsScreen({ navigation }) {
               onValueChange={(val) => {
                 setNotifications(val);
                 persistSettings({ notifications: val });
-              }}
-              trackColor={{ false: theme.switchTrackInactive, true: theme.switchTrackActive }}
-            />
-          </View>
-
-          <View style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: theme.textPrimary }]}>Dark Theme</Text>
-              <Text style={[styles.settingSub, { color: theme.textSecondary }]}>Deep obsidian UI</Text>
-            </View>
-            <Switch
-              value={darkTheme}
-              onValueChange={handleDarkThemeToggle}
-              trackColor={{ false: theme.switchTrackInactive, true: theme.switchTrackActive }}
-            />
-          </View>
-
-          <View style={[styles.settingRow, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            <View style={styles.settingTextContainer}>
-              <Text style={[styles.settingTitle, { color: theme.textPrimary }]}>Biometric Login</Text>
-              <Text style={[styles.settingSub, { color: theme.textSecondary }]}>Fingerprint & FaceID</Text>
-            </View>
-            <Switch
-              value={biometrics}
-              onValueChange={(val) => {
-                setBiometrics(val);
-                persistSettings({ biometrics: val });
               }}
               trackColor={{ false: theme.switchTrackInactive, true: theme.switchTrackActive }}
             />
