@@ -1,178 +1,1196 @@
-import React, { createContext, useState, useEffect } from 'react';
+import React, {
+  createContext,
+  useState,
+  useEffect,
+  useCallback,
+  useRef,
+} from 'react';
+
 import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as LocalAuthentication from 'expo-local-authentication';
-import { 
-  createUserWithEmailAndPassword, 
-  signInWithEmailAndPassword, 
-  signOut as firebaseSignOut, 
+
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut as firebaseSignOut,
   onAuthStateChanged,
-  updateProfile 
+  updateProfile,
 } from 'firebase/auth';
+
 import { auth } from '../config/firebase';
+
+import {
+  getUserProfile,
+  updateUserProfile,
+} from '../services/api';
+
+
+/* ============================================================
+   STORAGE
+============================================================ */
 
 const STORAGE_KEY = '@caresense_user_settings_v2';
 
-export const AuthContext = createContext();
+
+/* ============================================================
+   CONTEXT
+============================================================ */
+
+export const AuthContext = createContext(null);
+
+
+/* ============================================================
+   PROVIDER
+============================================================ */
 
 export const AuthProvider = ({ children }) => {
-  const systemColorScheme = useColorScheme();
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  
-  // App Preferences State
-  const [isDarkMode, setIsDarkMode] = useState(systemColorScheme === 'dark');
-  const [isBiometricsEnabled, setIsBiometricsEnabled] = useState(true);
-  const [isAppLocked, setIsAppLocked] = useState(false);
 
-  // Initialize and load local storage settings
+  /* ==========================================================
+     SYSTEM / THEME
+  ========================================================== */
+
+  const systemColorScheme = useColorScheme();
+
+  const [isDarkMode, setIsDarkMode] = useState(
+    systemColorScheme === 'dark'
+  );
+
+
+  /* ==========================================================
+     AUTH STATE
+  ========================================================== */
+
+  const [user, setUser] = useState(null);
+
+  const [loading, setLoading] = useState(true);
+
+
+  /* ==========================================================
+     BACKEND PROFILE STATE
+  ========================================================== */
+
+  const [profile, setProfile] = useState(null);
+
+  const [profileLoading, setProfileLoading] = useState(false);
+
+  const [profileError, setProfileError] = useState(null);
+
+
+  /* ==========================================================
+     BIOMETRIC STATE
+  ========================================================== */
+
+  const [isBiometricsEnabled, setIsBiometricsEnabled] =
+    useState(false);
+
+  const [isAppLocked, setIsAppLocked] =
+    useState(false);
+
+
+  /* ==========================================================
+     INTERNAL REFS
+  ========================================================== */
+
+  /*
+   * Prevents duplicate biometric prompts when Firebase
+   * fires auth state updates more than once.
+   */
+  const biometricCheckedForUser = useRef(null);
+
+  /*
+   * Prevents state updates after a component/provider
+   * lifecycle has changed.
+   */
+  const mountedRef = useRef(true);
+
+
+  /* ==========================================================
+     SAFE MOUNT TRACKING
+  ========================================================== */
+
   useEffect(() => {
+    mountedRef.current = true;
+
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+
+  /* ==========================================================
+     LOCAL SETTINGS
+  ========================================================== */
+
+  useEffect(() => {
+
     const loadSettings = async () => {
       try {
-        const savedData = await AsyncStorage.getItem(STORAGE_KEY);
-        if (savedData !== null) {
-          const parsed = JSON.parse(savedData);
-          if (parsed.darkTheme !== undefined) setIsDarkMode(parsed.darkTheme);
-          if (parsed.biometrics !== undefined) setIsBiometricsEnabled(parsed.biometrics);
+        const savedData =
+          await AsyncStorage.getItem(STORAGE_KEY);
+
+        if (!savedData) {
+          return;
         }
-      } catch (e) {
-        console.error('Failed to load storage settings:', e);
+
+        const parsed = JSON.parse(savedData);
+
+        if (
+          parsed &&
+          typeof parsed.darkTheme === 'boolean'
+        ) {
+          setIsDarkMode(parsed.darkTheme);
+        }
+
+        if (
+          parsed &&
+          typeof parsed.biometrics === 'boolean'
+        ) {
+          setIsBiometricsEnabled(parsed.biometrics);
+        }
+
+      } catch (error) {
+        console.error(
+          'Failed to load CareSense settings:',
+          error
+        );
       }
     };
-    loadSettings();
+
+    void loadSettings();
+
   }, []);
 
-  // Listen for Firebase auth state changes
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        setUser({
-          uid: currentUser.uid,
-          email: currentUser.email,
-          name: currentUser.displayName || 'User'
-        });
-        
-        // Trigger biometric authentication check on user sign in / restart if enabled
-        checkBiometricsOnLaunch();
-      } else {
-        setUser(null);
-        setIsAppLocked(false);
+
+  /* ==========================================================
+     PROFILE: BUILD FIREBASE FALLBACK
+  ========================================================== */
+
+  const buildFirebaseFallbackProfile = useCallback(
+    firebaseUser => {
+
+      if (!firebaseUser) {
+        return null;
       }
-      setLoading(false);
-    });
 
-    return () => unsubscribe();
-  }, []);
+      const displayName =
+        firebaseUser.displayName?.trim() || '';
 
-  // Prompt Biometric Authentication
-  const checkBiometricsOnLaunch = async () => {
+      const nameParts =
+        displayName
+          ? displayName.split(/\s+/)
+          : [];
+
+      const firstName =
+        nameParts[0] || '';
+
+      const lastName =
+        nameParts.slice(1).join(' ') || '';
+
+      return {
+        firebase_uid: firebaseUser.uid,
+
+        email: firebaseUser.email || '',
+
+        first_name: firstName,
+
+        last_name: lastName,
+
+        profile_photo_url:
+          firebaseUser.photoURL || null,
+
+        date_of_birth: null,
+
+        gender: '',
+
+        height_cm: null,
+
+        weight_kg: null,
+
+        blood_type: '',
+
+        medical_conditions: '',
+
+        current_medications: '',
+
+        allergies: '',
+
+        emergency_contact_name: '',
+
+        emergency_contact_phone: '',
+
+        emergency_contact_relation: '',
+
+        onboarding_completed: false,
+      };
+    },
+    []
+  );
+
+
+  /* ==========================================================
+     PROFILE: LOAD FROM BACKEND
+  ========================================================== */
+
+  const refreshProfile = useCallback(async () => {
+
+    const currentUser = auth.currentUser;
+
+    if (!currentUser) {
+
+      if (mountedRef.current) {
+        setProfile(null);
+        setProfileError(null);
+        setProfileLoading(false);
+      }
+
+      return null;
+    }
+
+    if (mountedRef.current) {
+      setProfileLoading(true);
+      setProfileError(null);
+    }
+
     try {
-      const savedData = await AsyncStorage.getItem(STORAGE_KEY);
-      const parsed = savedData ? JSON.parse(savedData) : null;
-      const biometricsActive = parsed?.biometrics !== undefined ? parsed.biometrics : isBiometricsEnabled;
 
-      if (biometricsActive) {
-        const hasHardware = await LocalAuthentication.hasHardwareAsync();
-        const isEnrolled = await LocalAuthentication.isEnrolledAsync();
+      const backendProfile =
+        await getUserProfile();
 
-        if (hasHardware && isEnrolled) {
-          setIsAppLocked(true);
-          const result = await LocalAuthentication.authenticateAsync({
-            promptMessage: 'CareSense AI Protected',
-            subtitle: 'Authenticate to access CareSense AI',
-            cancelLabel: 'Cancel',
-            fallbackLabel: 'Enter password',
-            disableDeviceFallback: false,
-          });
+      if (!mountedRef.current) {
+        return backendProfile;
+      }
 
-          if (result.success) {
-            setIsAppLocked(false);
-          }
+      /*
+       * Backend profile is the source of truth.
+       * Firebase values are only used as safe fallbacks
+       * for fields that haven't been stored yet.
+       */
+      const fallbackProfile =
+        buildFirebaseFallbackProfile(currentUser);
+
+      const mergedProfile = {
+        ...fallbackProfile,
+        ...backendProfile,
+
+        /*
+         * Keep Firebase photo if the backend doesn't
+         * have a custom photo yet.
+         */
+        profile_photo_url:
+          backendProfile?.profile_photo_url ||
+          currentUser.photoURL ||
+          null,
+
+        email:
+          backendProfile?.email ||
+          currentUser.email ||
+          '',
+      };
+
+      setProfile(mergedProfile);
+
+      return mergedProfile;
+
+    } catch (error) {
+
+      console.error(
+        'Failed to load CareSense profile:',
+        error
+      );
+
+      /*
+       * Don't destroy the user's session simply because
+       * Render is waking up or the backend is temporarily
+       * unavailable.
+       */
+      const fallbackProfile =
+        buildFirebaseFallbackProfile(currentUser);
+
+      if (mountedRef.current) {
+
+        setProfile(fallbackProfile);
+
+        setProfileError(
+          error?.response?.data ||
+          error?.message ||
+          'Unable to load profile from the server.'
+        );
+      }
+
+      return fallbackProfile;
+
+    } finally {
+
+      if (mountedRef.current) {
+        setProfileLoading(false);
+      }
+    }
+
+  }, [buildFirebaseFallbackProfile]);
+
+
+  /* ==========================================================
+     PROFILE: UPDATE
+  ========================================================== */
+
+  const saveProfile = useCallback(
+    async profileData => {
+
+      const currentUser = auth.currentUser;
+
+      if (!currentUser) {
+        throw new Error(
+          'Please sign in before updating your profile.'
+        );
+      }
+
+      if (
+        !profileData ||
+        typeof profileData !== 'object'
+      ) {
+        throw new Error(
+          'Invalid profile data.'
+        );
+      }
+
+      if (mountedRef.current) {
+        setProfileLoading(true);
+        setProfileError(null);
+      }
+
+      try {
+
+        const updatedProfile =
+          await updateUserProfile(profileData);
+
+        /*
+         * Merge the response with the current in-memory
+         * profile instead of replacing unrelated fields.
+         */
+        const nextProfile = {
+          ...(profile || {}),
+          ...(updatedProfile || {}),
+        };
+
+        if (mountedRef.current) {
+          setProfile(nextProfile);
+        }
+
+        return nextProfile;
+
+      } catch (error) {
+
+        console.error(
+          'Failed to save CareSense profile:',
+          error
+        );
+
+        if (mountedRef.current) {
+          setProfileError(
+            error?.response?.data ||
+            error?.message ||
+            'Unable to save your profile.'
+          );
+        }
+
+        throw error;
+
+      } finally {
+
+        if (mountedRef.current) {
+          setProfileLoading(false);
         }
       }
-    } catch (e) {
-      console.error('Biometric launch authentication error:', e);
-    }
-  };
 
-  const authenticateBiometricsManually = async () => {
-    try {
-      const result = await LocalAuthentication.authenticateAsync({
-        promptMessage: 'CareSense AI Protected',
-        subtitle: 'Authenticate to access CareSense AI',
-        fallbackLabel: 'Use Device Passcode',
-        cancelLabel: 'Cancel',
-      });
-      if (result.success) {
+    },
+    [profile]
+  );
+
+
+  /* ==========================================================
+     BIOMETRIC AUTHENTICATION
+  ========================================================== */
+
+  const checkBiometricsOnLaunch = useCallback(
+    async firebaseUser => {
+
+      if (!firebaseUser?.uid) {
+        return;
+      }
+
+      /*
+       * Do not prompt multiple times for the same
+       * authenticated Firebase session.
+       */
+      if (
+        biometricCheckedForUser.current ===
+        firebaseUser.uid
+      ) {
+        return;
+      }
+
+      biometricCheckedForUser.current =
+        firebaseUser.uid;
+
+      try {
+
+        const savedData =
+          await AsyncStorage.getItem(STORAGE_KEY);
+
+        const parsed =
+          savedData
+            ? JSON.parse(savedData)
+            : {};
+
+        const biometricsActive =
+          parsed?.biometrics === true;
+
+        /*
+         * Keep state synchronized with storage.
+         */
+        if (mountedRef.current) {
+          setIsBiometricsEnabled(
+            biometricsActive
+          );
+        }
+
+        if (!biometricsActive) {
+          if (mountedRef.current) {
+            setIsAppLocked(false);
+          }
+
+          return;
+        }
+
+        const hasHardware =
+          await LocalAuthentication.hasHardwareAsync();
+
+        const isEnrolled =
+          await LocalAuthentication.isEnrolledAsync();
+
+        if (
+          !hasHardware ||
+          !isEnrolled
+        ) {
+          if (mountedRef.current) {
+            setIsAppLocked(false);
+          }
+
+          return;
+        }
+
+        if (mountedRef.current) {
+          setIsAppLocked(true);
+        }
+
+        const result =
+          await LocalAuthentication.authenticateAsync({
+            promptMessage:
+              'CareSense AI Protected',
+
+            subtitle:
+              'Authenticate to access CareSense AI',
+
+            cancelLabel:
+              'Cancel',
+
+            fallbackLabel:
+              'Enter password',
+
+            disableDeviceFallback:
+              false,
+          });
+
+        if (
+          result.success &&
+          mountedRef.current
+        ) {
+          setIsAppLocked(false);
+        }
+
+      } catch (error) {
+
+        console.error(
+          'Biometric launch authentication error:',
+          error
+        );
+
+        /*
+         * Fail closed while biometric protection is enabled.
+         */
+        if (
+          mountedRef.current &&
+          isBiometricsEnabled
+        ) {
+          setIsAppLocked(true);
+        }
+      }
+
+    },
+    [isBiometricsEnabled]
+  );
+
+
+  /* ==========================================================
+     FIREBASE AUTH STATE
+  ========================================================== */
+
+  useEffect(() => {
+
+    const unsubscribe =
+      onAuthStateChanged(
+        auth,
+        async currentUser => {
+
+          /*
+           * User signed out.
+           */
+          if (!currentUser) {
+
+            biometricCheckedForUser.current =
+              null;
+
+            if (mountedRef.current) {
+
+              setUser(null);
+
+              setProfile(null);
+
+              setProfileError(null);
+
+              setProfileLoading(false);
+
+              setIsAppLocked(false);
+            }
+
+            setLoading(false);
+
+            return;
+          }
+
+
+          /*
+           * Firebase user object.
+           */
+          const displayName =
+            currentUser.displayName ||
+            currentUser.email?.split('@')[0] ||
+            'User';
+
+
+          const firebaseUser = {
+            uid: currentUser.uid,
+
+            email:
+              currentUser.email || '',
+
+            name:
+              displayName,
+
+            displayName:
+              currentUser.displayName || '',
+
+            photoURL:
+              currentUser.photoURL || null,
+
+            emailVerified:
+              currentUser.emailVerified === true,
+          };
+
+
+          if (mountedRef.current) {
+            setUser(firebaseUser);
+          }
+
+
+          /*
+           * Load persistent backend profile.
+           */
+          await refreshProfile();
+
+
+          /*
+           * Check device protection.
+           */
+          await checkBiometricsOnLaunch(
+            currentUser
+          );
+
+
+          if (mountedRef.current) {
+            setLoading(false);
+          }
+        }
+      );
+
+    return () => unsubscribe();
+
+  }, [
+    refreshProfile,
+    checkBiometricsOnLaunch,
+  ]);
+
+
+  /* ==========================================================
+     MANUAL BIOMETRIC AUTH
+  ========================================================== */
+
+  const authenticateBiometricsManually =
+    useCallback(async () => {
+
+      try {
+
+        const hasHardware =
+          await LocalAuthentication.hasHardwareAsync();
+
+        if (!hasHardware) {
+          return false;
+        }
+
+        const isEnrolled =
+          await LocalAuthentication.isEnrolledAsync();
+
+        if (!isEnrolled) {
+          return false;
+        }
+
+        const result =
+          await LocalAuthentication.authenticateAsync({
+            promptMessage:
+              'CareSense AI Protected',
+
+            subtitle:
+              'Authenticate to access CareSense AI',
+
+            fallbackLabel:
+              'Use Device Passcode',
+
+            cancelLabel:
+              'Cancel',
+          });
+
+        if (result.success) {
+
+          if (mountedRef.current) {
+            setIsAppLocked(false);
+          }
+
+          return true;
+        }
+
+        return false;
+
+      } catch (error) {
+
+        console.error(
+          'Manual biometric authentication error:',
+          error
+        );
+
+        return false;
+      }
+
+    }, []);
+
+
+  /* ==========================================================
+     TOGGLE BIOMETRICS
+  ========================================================== */
+
+  const toggleBiometrics =
+    useCallback(async enabled => {
+
+      try {
+
+        /*
+         * Turning OFF
+         */
+        if (!enabled) {
+
+          setIsBiometricsEnabled(false);
+
+          setIsAppLocked(false);
+
+          const existing =
+            await AsyncStorage.getItem(
+              STORAGE_KEY
+            );
+
+          const parsed =
+            existing
+              ? JSON.parse(existing)
+              : {};
+
+          await AsyncStorage.setItem(
+            STORAGE_KEY,
+            JSON.stringify({
+              ...parsed,
+              biometrics: false,
+            })
+          );
+
+          return {
+            success: true,
+          };
+        }
+
+
+        /*
+         * Turning ON
+         */
+        const hasHardware =
+          await LocalAuthentication.hasHardwareAsync();
+
+        if (!hasHardware) {
+
+          return {
+            success: false,
+
+            message:
+              'This device does not support biometric authentication.',
+          };
+        }
+
+
+        const isEnrolled =
+          await LocalAuthentication.isEnrolledAsync();
+
+        if (!isEnrolled) {
+
+          return {
+            success: false,
+
+            message:
+              'No fingerprint or Face ID is enrolled on this device.',
+          };
+        }
+
+
+        /*
+         * Verify the user before enabling protection.
+         */
+        const result =
+          await LocalAuthentication.authenticateAsync({
+            promptMessage:
+              'Enable CareSense AI Protection',
+
+            subtitle:
+              'Verify your identity to enable biometric protection.',
+
+            cancelLabel:
+              'Cancel',
+
+            fallbackLabel:
+              'Use Device Passcode',
+
+            disableDeviceFallback:
+              false,
+          });
+
+
+        if (!result.success) {
+
+          return {
+            success: false,
+
+            message:
+              'Biometric verification was not completed. Protection remains off.',
+          };
+        }
+
+
+        setIsBiometricsEnabled(true);
+
         setIsAppLocked(false);
+
+
+        const existing =
+          await AsyncStorage.getItem(
+            STORAGE_KEY
+          );
+
+        const parsed =
+          existing
+            ? JSON.parse(existing)
+            : {};
+
+
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            ...parsed,
+            biometrics: true,
+          })
+        );
+
+
+        /*
+         * Make sure a future Firebase auth event
+         * doesn't trigger another prompt immediately.
+         */
+        if (auth.currentUser?.uid) {
+          biometricCheckedForUser.current =
+            auth.currentUser.uid;
+        }
+
+
+        return {
+          success: true,
+        };
+
+      } catch (error) {
+
+        console.error(
+          'Failed to toggle biometric protection:',
+          error
+        );
+
+        return {
+          success: false,
+
+          message:
+            'Unable to change biometric protection right now.',
+        };
+      }
+
+    }, []);
+
+
+  /* ==========================================================
+     GLOBAL THEME
+  ========================================================== */
+
+  const toggleGlobalTheme =
+    useCallback(async value => {
+
+      setIsDarkMode(value);
+
+      try {
+
+        const existing =
+          await AsyncStorage.getItem(
+            STORAGE_KEY
+          );
+
+        const parsed =
+          existing
+            ? JSON.parse(existing)
+            : {};
+
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify({
+            ...parsed,
+            darkTheme: value,
+          })
+        );
+
+      } catch (error) {
+
+        console.error(
+          'Failed to save theme setting:',
+          error
+        );
+      }
+
+    }, []);
+
+
+  /* ==========================================================
+     LOGIN
+  ========================================================== */
+
+  const login = useCallback(
+    async (email, password) => {
+
+      if (!email?.trim()) {
+        throw new Error(
+          'Please enter your email address.'
+        );
+      }
+
+      if (!password) {
+        throw new Error(
+          'Please enter your password.'
+        );
+      }
+
+      try {
+
+        await signInWithEmailAndPassword(
+          auth,
+          email.trim(),
+          password
+        );
+
         return true;
+
+      } catch (error) {
+
+        console.error(
+          'Firebase Login Error:',
+          error
+        );
+
+        throw error;
       }
-      return false;
-    } catch (e) {
-      console.error('Manual biometric error:', e);
-      return false;
-    }
-  };
 
-  const toggleGlobalTheme = async (value) => {
-    setIsDarkMode(value);
-    try {
-      const existing = await AsyncStorage.getItem(STORAGE_KEY);
-      const parsed = existing ? JSON.parse(existing) : {};
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify({ ...parsed, darkTheme: value }));
-    } catch (e) {
-      console.error('Failed to save theme setting:', e);
-    }
-  };
+    },
+    []
+  );
 
-  const login = async (email, password) => {
-    try {
-      await signInWithEmailAndPassword(auth, email, password);
-      return true;
-    } catch (error) {
-      console.error("Firebase Login Error:", error);
-      throw error;
-    }
-  };
 
-  const signup = async (name, email, password) => {
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      if (userCredential.user) {
-        await updateProfile(userCredential.user, { displayName: name });
-        setUser({
-          uid: userCredential.user.uid,
-          email: userCredential.user.email,
-          name: name
-        });
+  /* ==========================================================
+     SIGNUP
+  ========================================================== */
+
+  const signup = useCallback(
+    async (name, email, password) => {
+
+      if (!name?.trim()) {
+        throw new Error(
+          'Please enter your name.'
+        );
       }
-      return true;
-    } catch (error) {
-      console.error("Firebase Signup Error:", error);
-      throw error;
-    }
-  };
 
-  const logout = async () => {
+      if (!email?.trim()) {
+        throw new Error(
+          'Please enter your email address.'
+        );
+      }
+
+      if (!password) {
+        throw new Error(
+          'Please enter a password.'
+        );
+      }
+
+      try {
+
+        const userCredential =
+          await createUserWithEmailAndPassword(
+            auth,
+            email.trim(),
+            password
+          );
+
+        const firebaseUser =
+          userCredential.user;
+
+
+        if (firebaseUser) {
+
+          /*
+           * Save the Firebase display name.
+           */
+          await updateProfile(
+            firebaseUser,
+            {
+              displayName:
+                name.trim(),
+            }
+          );
+
+
+          /*
+           * Immediately expose the new Firebase
+           * identity locally.
+           */
+          const nextUser = {
+            uid:
+              firebaseUser.uid,
+
+            email:
+              firebaseUser.email || email.trim(),
+
+            name:
+              name.trim(),
+
+            displayName:
+              name.trim(),
+
+            photoURL:
+              firebaseUser.photoURL || null,
+
+            emailVerified:
+              firebaseUser.emailVerified === true,
+          };
+
+
+          if (mountedRef.current) {
+            setUser(nextUser);
+          }
+
+
+          /*
+           * Create/load backend profile immediately.
+           *
+           * The backend GET endpoint automatically creates
+           * a profile for authenticated users that don't have
+           * one yet.
+           */
+          const createdProfile =
+            await refreshProfile();
+
+
+          /*
+           * Safety fallback if the backend is temporarily
+           * unavailable.
+           */
+          if (
+            !createdProfile &&
+            mountedRef.current
+          ) {
+
+            setProfile(
+              buildFirebaseFallbackProfile(
+                firebaseUser
+              )
+            );
+          }
+        }
+
+
+        return true;
+
+      } catch (error) {
+
+        console.error(
+          'Firebase Signup Error:',
+          error
+        );
+
+        throw error;
+      }
+
+    },
+    [
+      refreshProfile,
+      buildFirebaseFallbackProfile,
+    ]
+  );
+
+
+  /* ==========================================================
+     LOGOUT
+  ========================================================== */
+
+  const logout = useCallback(async () => {
+
     try {
+
       await firebaseSignOut(auth);
+
+      biometricCheckedForUser.current =
+        null;
+
+      if (mountedRef.current) {
+
+        setUser(null);
+
+        setProfile(null);
+
+        setProfileError(null);
+
+        setProfileLoading(false);
+
+        setIsAppLocked(false);
+      }
+
     } catch (error) {
-      console.error("Firebase Logout Error:", error);
+
+      console.error(
+        'Firebase Logout Error:',
+        error
+      );
+
+      throw error;
     }
+
+  }, []);
+
+
+  /* ==========================================================
+     DERIVED PROFILE VALUES
+  ========================================================== */
+
+  const onboardingCompleted =
+    profile?.onboarding_completed === true;
+
+
+  const profilePhoto =
+    profile?.profile_photo_url ||
+    user?.photoURL ||
+    null;
+
+
+  const fullName =
+    [
+      profile?.first_name,
+      profile?.last_name,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .trim() ||
+    user?.displayName ||
+    user?.name ||
+    user?.email?.split('@')[0] ||
+    'User';
+
+
+  /* ==========================================================
+     CONTEXT VALUE
+  ========================================================== */
+
+  const contextValue = {
+    /*
+     * Authentication
+     */
+    user,
+    loading,
+    login,
+    signup,
+    logout,
+
+    /*
+     * Persistent backend profile
+     */
+    profile,
+    profileLoading,
+    profileError,
+    refreshProfile,
+    saveProfile,
+
+    /*
+     * Useful derived profile values
+     */
+    fullName,
+    profilePhoto,
+    onboardingCompleted,
+
+    /*
+     * Theme
+     */
+    isDarkMode,
+    toggleGlobalTheme,
+
+    /*
+     * Biometrics
+     */
+    isBiometricsEnabled,
+    toggleBiometrics,
+    isAppLocked,
+    authenticateBiometricsManually,
   };
+
+
+  /* ==========================================================
+     PROVIDER
+  ========================================================== */
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      loading, 
-      login, 
-      signup, 
-      logout,
-      isDarkMode,
-      toggleGlobalTheme,
-      isAppLocked,
-      authenticateBiometricsManually
-    }}>
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

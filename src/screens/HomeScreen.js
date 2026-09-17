@@ -86,7 +86,12 @@ const ActionCard = memo(({ action, theme, width, onPress }) => (
 ============================================================ */
 
 export default function HomeScreen({ navigation }) {
-  const { user } = useContext(AuthContext) || {};
+  const {
+    user,
+    profilePhoto,
+    fullName,
+  } = useContext(AuthContext) || {};
+const [avatarImageFailed, setAvatarImageFailed] = useState(false);
   const isDark = useColorScheme() === 'dark';
   const { width } = useWindowDimensions();
   const theme = useMemo(() => getTheme(isDark), [isDark]);
@@ -106,8 +111,15 @@ export default function HomeScreen({ navigation }) {
 
   // Responsive Grid
   const actionCardWidth = (width - 40 - 12) / 2;
-  const displayName = user?.displayName || user?.name || user?.email?.split('@')[0] || 'User';
-  const avatarLetter = (displayName?.trim()?.charAt(0) || 'U').toUpperCase();
+  const displayName =
+    fullName?.trim() ||
+    user?.displayName ||
+    user?.name ||
+    user?.email?.split('@')[0] ||
+    'User';
+
+  const avatarLetter =
+    (displayName?.trim()?.charAt(0) || 'U').toUpperCase();
 
   /* ==========================================================
      FETCH REAL-TIME DASHBOARD DATA
@@ -205,9 +217,33 @@ export default function HomeScreen({ navigation }) {
               How are you feeling today?
             </Text>
           </View>
-          <View style={[styles.avatarCircle, { backgroundColor: theme.card, borderColor: theme.border, borderWidth: 1 }]}>
-            <Text style={[styles.avatarText, { color: theme.cyanAccent }]}>{avatarLetter}</Text>
-          </View>
+            <View
+              style={[
+                styles.avatarCircle,
+                {
+                  backgroundColor: theme.card,
+                  borderColor: theme.border,
+                  borderWidth: 1,
+                },
+              ]}
+            >
+              {profilePhoto && !avatarImageFailed ? (
+                <Image
+                  source={{ uri: profilePhoto }}
+                  style={styles.avatarImage}
+                  onError={() => setAvatarImageFailed(true)}
+                />
+              ) : (
+                <Text
+                  style={[
+                    styles.avatarText,
+                    { color: theme.cyanAccent },
+                  ]}
+                >
+                  {avatarLetter}
+                </Text>
+              )}
+            </View>
         </View>
 
         {/* ================= CARESENSE AI SCORE ================= */}
@@ -374,9 +410,24 @@ const styles = StyleSheet.create({
   headerTextContainer: { flex: 1, paddingRight: 12 },
   greeting: { fontSize: 22, fontWeight: '700', marginBottom: 4 },
   subGreeting: { fontSize: 14, fontWeight: '400' },
-  avatarCircle: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
-  avatarText: { fontSize: 18, fontWeight: 'bold' },
+avatarCircle: {
+  width: 44,
+  height: 44,
+  borderRadius: 22,
+  alignItems: 'center',
+  justifyContent: 'center',
+  overflow: 'hidden',
+  },
 
+  avatarImage: {
+    width: '100%',
+    height: '100%',
+  },
+
+  avatarText: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
   careSenseCard: { flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 16, borderWidth: 1, marginBottom: 20 },
   scoreCircle: { width: 68, height: 68, borderRadius: 34, borderWidth: 6, borderRightColor: 'transparent', borderBottomColor: 'transparent', alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-45deg' }] },
   scoreText: { fontSize: 22, fontWeight: 'bold', transform: [{ rotate: '45deg' }] },

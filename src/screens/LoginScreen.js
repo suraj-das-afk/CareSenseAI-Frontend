@@ -1,123 +1,358 @@
-import React, { useState, useContext } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import React, { useState, useContext, useRef, useEffect } from 'react';
+import {
+  View,
+  Text,
+  TextInput,
+  StyleSheet,
+  ActivityIndicator,
+  useColorScheme,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
+  Animated,
+  Pressable,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Ionicons from '@expo/vector-icons/Ionicons';
+
 import { AuthContext } from '../context/AuthContext';
 import { PopupContext } from '../context/PopupContext';
 
+// Reusable micro-interaction press wrapper (Matching SearchScreen)
+function AnimatedPressable({ children, onPress, style, disabled }) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const onPressIn = () => {
+    if (disabled) return;
+    Animated.spring(scale, { toValue: 0.96, useNativeDriver: true, speed: 50, bounciness: 4 }).start();
+  };
+
+  const onPressOut = () => {
+    if (disabled) return;
+    Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 40, bounciness: 4 }).start();
+  };
+
+  return (
+    <Pressable onPressIn={onPressIn} onPressOut={onPressOut} onPress={disabled ? null : onPress}>
+      <Animated.View style={[style, { transform: [{ scale }] }]}>{children}</Animated.View>
+    </Pressable>
+  );
+}
+
 export default function LoginScreen({ navigation }) {
+  const isDark = useColorScheme() === 'dark';
+  
+  // CareSense AI Theme Palette
+  const theme = {
+    background: isDark ? '#080C14' : '#F8FAFC',
+    card: isDark ? '#121826' : '#FFFFFF',
+    border: isDark ? '#1E293B' : '#E2E8F0',
+    textPrimary: isDark ? '#F8FAFC' : '#0F172A',
+    textSecondary: isDark ? '#94A3B8' : '#64748B',
+    textMuted: isDark ? '#475569' : '#94A3B8',
+    inputBg: isDark ? '#0F172A' : '#FFFFFF',
+    accent: '#00D4C5',
+    googleBg: isDark ? '#1E293B' : '#FFFFFF',
+  };
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { login } = useContext(AuthContext);
-  const { showPopup } = useContext(PopupContext);
+  const [isGoogleSubmitting, setIsGoogleSubmitting] = useState(false);
 
-  const handleLogin = async () => {
-    if (!email || !password) {
-      showPopup('Missing Fields', 'Please enter both email and password.', 'warning');
+  // Assuming googleLogin is available in your AuthContext
+  const { login, googleLogin } = useContext(AuthContext) || {};
+  const { showPopup } = useContext(PopupContext) || {};
+
+  // Entry Animation
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const slideAnim = useRef(new Animated.Value(20)).current;
+
+  useEffect(() => {
+    Animated.parallel([
+      Animated.timing(fadeAnim, { toValue: 1, duration: 400, useNativeDriver: true }),
+      Animated.timing(slideAnim, { toValue: 0, duration: 400, useNativeDriver: true }),
+    ]).start();
+  }, [fadeAnim, slideAnim]);
+
+  const handleEmailLogin = async () => {
+    if (!email.trim() || !password) {
+      showPopup?.('Missing Fields', 'Please enter both email and password.', 'warning');
       return;
     }
     
     setIsSubmitting(true);
+    Keyboard.dismiss();
+
     try {
-      await login(email, password);
-      showPopup('Welcome Back!', 'Successfully logged in.', 'success');
+      await login?.(email.trim(), password);
+      showPopup?.('Welcome Back!', 'Successfully logged in.', 'success');
     } catch (error) {
-      showPopup('Login Failed', 'Invalid credentials.', 'error');
+      showPopup?.('Login Failed', 'Invalid credentials or network error.', 'error');
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  const handleGoogleAuth = async () => {
+    setIsGoogleSubmitting(true);
+    Keyboard.dismiss();
+
+    try {
+      if (googleLogin) {
+        await googleLogin();
+      } else {
+        // Fallback simulate delay if googleLogin isn't implemented yet
+        await new Promise(res => setTimeout(res, 1500));
+        showPopup?.('Info', 'Google Login requires Expo AuthSession setup.', 'warning');
+      }
+    } catch (error) {
+      showPopup?.('Google Auth Failed', 'Could not sign in with Google.', 'error');
+    } finally {
+      setIsGoogleSubmitting(false);
+    }
+  };
+
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>CareSense AI</Text>
-      <Text style={styles.subtitle}>Sign in to access your health dashboard</Text>
-      
-      <View style={styles.form}>
-        <TextInput
-          style={styles.input}
-          placeholder="Email Address"
-          placeholderTextColor="#9ca3af"
-          keyboardType="email-address"
-          autoCapitalize="none"
-          value={email}
-          onChangeText={setEmail}
-        />
-        <TextInput
-          style={styles.input}
-          placeholder="Password"
-          placeholderTextColor="#9ca3af"
-          secureTextEntry
-          value={password}
-          onChangeText={setPassword}
-        />
-        
-        <TouchableOpacity style={styles.button} onPress={handleLogin} disabled={isSubmitting}>
-          {isSubmitting ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.buttonText}>Login</Text>
-          )}
-        </TouchableOpacity>
-        
-        <TouchableOpacity style={styles.linkButton} onPress={() => navigation.navigate('Signup')}>
-          <Text style={styles.linkText}>Don't have an account? Sign up</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.background }]}>
+      <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+        <KeyboardAvoidingView 
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+          style={styles.container}
+        >
+          <Animated.View 
+            style={[
+              styles.content, 
+              { opacity: fadeAnim, transform: [{ translateY: slideAnim }] }
+            ]}
+          >
+            {/* Header Section */}
+            <View style={styles.headerContainer}>
+              <View style={[styles.iconWrapper, { backgroundColor: `${theme.accent}15` }]}>
+                <Ionicons name="pulse" size={32} color={theme.accent} />
+              </View>
+              <Text style={[styles.title, { color: theme.textPrimary }]}>CareSense AI</Text>
+              <Text style={[styles.subtitle, { color: theme.textSecondary }]}>
+                Sign in to access your health dashboard
+              </Text>
+            </View>
+
+            {/* Input Form */}
+            <View style={styles.form}>
+              {/* Email Input */}
+              <View style={[styles.inputContainer, { backgroundColor: theme.inputBg, borderColor: theme.border }]}>
+                <Ionicons name="mail-outline" size={20} color={theme.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={[styles.input, { color: theme.textPrimary }]}
+                  placeholder="Email Address"
+                  placeholderTextColor={theme.textMuted}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  value={email}
+                  onChangeText={setEmail}
+                />
+              </View>
+
+              {/* Password Input */}
+              <View style={[styles.inputContainer, { backgroundColor: theme.inputBg, borderColor: theme.border }]}>
+                <Ionicons name="lock-closed-outline" size={20} color={theme.textSecondary} style={styles.inputIcon} />
+                <TextInput
+                  style={[styles.input, { color: theme.textPrimary }]}
+                  placeholder="Password"
+                  placeholderTextColor={theme.textMuted}
+                  secureTextEntry={!showPassword}
+                  value={password}
+                  onChangeText={setPassword}
+                />
+                <Pressable onPress={() => setShowPassword(!showPassword)} hitSlop={15} style={styles.eyeIcon}>
+                  <Ionicons 
+                    name={showPassword ? "eye-off-outline" : "eye-outline"} 
+                    size={20} 
+                    color={theme.textSecondary} 
+                  />
+                </Pressable>
+              </View>
+
+              <Pressable style={styles.forgotPassword}>
+                <Text style={[styles.forgotPasswordText, { color: theme.accent }]}>Forgot Password?</Text>
+              </Pressable>
+
+              {/* Primary Login Button */}
+              <AnimatedPressable 
+                style={[styles.primaryButton, { backgroundColor: theme.accent }]} 
+                onPress={handleEmailLogin}
+                disabled={isSubmitting || isGoogleSubmitting}
+              >
+                {isSubmitting ? (
+                  <ActivityIndicator color="#0A0F1A" />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Sign In</Text>
+                )}
+              </AnimatedPressable>
+
+              {/* Divider */}
+              <View style={styles.dividerContainer}>
+                <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+                <Text style={[styles.dividerText, { color: theme.textMuted }]}>OR</Text>
+                <View style={[styles.dividerLine, { backgroundColor: theme.border }]} />
+              </View>
+
+              {/* Google Login Button */}
+              <AnimatedPressable 
+                style={[styles.googleButton, { backgroundColor: theme.googleBg, borderColor: theme.border }]} 
+                onPress={handleGoogleAuth}
+                disabled={isSubmitting || isGoogleSubmitting}
+              >
+                {isGoogleSubmitting ? (
+                  <ActivityIndicator color={theme.textPrimary} />
+                ) : (
+                  <>
+                    <Ionicons name="logo-google" size={20} color={theme.textPrimary} style={styles.googleIcon} />
+                    <Text style={[styles.googleButtonText, { color: theme.textPrimary }]}>Continue with Google</Text>
+                  </>
+                )}
+              </AnimatedPressable>
+
+              {/* Footer */}
+              <View style={styles.footer}>
+                <Text style={[styles.footerText, { color: theme.textSecondary }]}>Don't have an account? </Text>
+                <Pressable onPress={() => navigation.navigate('Signup')} hitSlop={10}>
+                  <Text style={[styles.footerLink, { color: theme.accent }]}>Sign up</Text>
+                </Pressable>
+              </View>
+
+            </View>
+          </Animated.View>
+        </KeyboardAvoidingView>
+      </TouchableWithoutFeedback>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
   container: {
     flex: 1,
-    backgroundColor: '#111827',
-    padding: 20,
     justifyContent: 'center',
+  },
+  content: {
+    paddingHorizontal: 24,
+    width: '100%',
+    maxWidth: 400,
+    alignSelf: 'center',
+  },
+  headerContainer: {
+    alignItems: 'center',
+    marginBottom: 40,
+  },
+  iconWrapper: {
+    width: 64,
+    height: 64,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
   },
   title: {
     fontSize: 32,
-    fontWeight: 'bold',
-    color: '#3b82f6',
-    textAlign: 'center',
-    marginBottom: 10,
+    fontWeight: '800',
+    letterSpacing: -0.5,
+    marginBottom: 8,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#9ca3af',
+    fontSize: 15,
+    fontWeight: '400',
     textAlign: 'center',
-    marginBottom: 40,
   },
   form: {
     width: '100%',
   },
-  input: {
-    backgroundColor: '#1f2937',
-    color: '#f9fafb',
-    borderRadius: 12,
-    padding: 16,
-    fontSize: 16,
-    marginBottom: 16,
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 56,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: '#374151',
+    paddingHorizontal: 16,
+    marginBottom: 16,
   },
-  button: {
-    backgroundColor: '#3b82f6',
-    paddingVertical: 16,
-    borderRadius: 12,
+  inputIcon: {
+    marginRight: 12,
+  },
+  input: {
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '500',
+    height: '100%',
+  },
+  eyeIcon: {
+    padding: 4,
+  },
+  forgotPassword: {
+    alignSelf: 'flex-end',
+    marginBottom: 24,
+  },
+  forgotPasswordText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  primaryButton: {
+    height: 56,
+    borderRadius: 16,
     alignItems: 'center',
-    marginTop: 10,
+    justifyContent: 'center',
+    marginBottom: 24,
   },
-  buttonText: {
-    color: '#ffffff',
-    fontSize: 18,
-    fontWeight: 'bold',
+  primaryButtonText: {
+    color: '#0A0F1A',
+    fontSize: 16,
+    fontWeight: '700',
   },
-  linkButton: {
-    marginTop: 20,
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  googleButton: {
+    flexDirection: 'row',
+    height: 56,
+    borderRadius: 16,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 32,
+  },
+  googleIcon: {
+    marginRight: 10,
+  },
+  googleButtonText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
     alignItems: 'center',
   },
-  linkText: {
-    color: '#60a5fa',
+  footerText: {
     fontSize: 14,
-  }
+  },
+  footerLink: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
 });
