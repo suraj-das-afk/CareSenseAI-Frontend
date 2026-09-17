@@ -4,9 +4,13 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { auth } from '../config/firebase';
 
-const API_URL = Platform.OS === 'android'
-  ? 'http://10.151.61.80:8000/api/'
-  : 'http://127.0.0.1:8000/api/';
+const API_URL = __DEV__
+  ? (
+      Platform.OS === 'android'
+        ? 'http://10.151.61.80:8000/api/'
+        : 'http://127.0.0.1:8000/api/'
+    )
+  : 'https://caresenseai-backend.onrender.com/api/';
 
 const api = axios.create({
   baseURL: API_URL,

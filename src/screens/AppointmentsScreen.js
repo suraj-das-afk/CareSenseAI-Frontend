@@ -14,8 +14,8 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { AuthContext } from '../context/AuthContext';
+import api from '../services/api';
 
-const API_BASE_URL = 'http://10.0.2.2:8000/api';
 
 const BRAND = {
   cyan: '#00D4C5',
@@ -122,22 +122,17 @@ export default function AppointmentsScreen({ navigation }) {
 
   const fetchAppointments = useCallback(async () => {
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 4000);
+      const response = await api.get('appointments/', {
+        params: {
+          user_id: user?.uid || '',
+        },
+        timeout: 4000,
+      });
 
-      const response = await fetch(
-        `${API_BASE_URL}/appointments/?user_id=${user?.uid || ''}`,
-        { signal: controller.signal }
-      );
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        const data = await response.json();
-        setAppointments(Array.isArray(data) ? data : []);
-      } else {
-        setAppointments([]);
-      }
+      const data = response.data;
+      setAppointments(Array.isArray(data) ? data : []);
     } catch (error) {
+      console.error('Appointments Error:', error);
       setAppointments([]);
     } finally {
       setLoading(false);
