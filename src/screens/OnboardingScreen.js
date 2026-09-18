@@ -20,6 +20,8 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  StatusBar,
+  useWindowDimensions,
 } from 'react-native';
 
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -174,6 +176,81 @@ const formatDateOfBirth = value => {
   return `${day}/${month}/${year}`;
 };
 
+
+const formatListField = value => {
+  if (Array.isArray(value)) {
+    return value
+      .map(item => String(item).trim())
+      .filter(Boolean)
+      .join(', ');
+  }
+
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  return String(value);
+};
+
+
+const parseListField = value => {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '').split(',');
+
+  const seen = new Set();
+
+  return source
+    .map(item => String(item).trim())
+    .filter(Boolean)
+    .filter(item => {
+      const key = item.toLowerCase();
+
+      if (seen.has(key)) {
+        return false;
+      }
+
+      seen.add(key);
+      return true;
+    });
+};
+
+
+const getApiErrorMessage = error => {
+  const data = error?.response?.data;
+
+  if (!data) {
+    return error?.message || 'Unable to save your profile right now.';
+  }
+
+  if (typeof data === 'string') {
+    return data;
+  }
+
+  if (typeof data.detail === 'string') {
+    return data.detail;
+  }
+
+  if (typeof data === 'object') {
+    const messages = Object.entries(data)
+      .flatMap(([field, value]) => {
+        const values = Array.isArray(value)
+          ? value
+          : [value];
+
+        return values
+          .filter(Boolean)
+          .map(message => `${field}: ${message}`);
+      });
+
+    if (messages.length > 0) {
+      return messages.join('\n');
+    }
+  }
+
+  return 'Unable to save your profile right now.';
+};
+
 const STEPS = [
   {
     key: 'basic',
@@ -235,6 +312,7 @@ export default function OnboardingScreen() {
     user,
     profile,
     saveProfile,
+    logout,
     isDarkMode,
   } = useContext(AuthContext);
 
@@ -244,6 +322,19 @@ export default function OnboardingScreen() {
     () => getTheme(isDark),
     [isDark],
   );
+
+  const {
+    width: windowWidth,
+  } = useWindowDimensions();
+
+  const horizontalGutter =
+    Math.min(24, Math.max(16, windowWidth * 0.055));
+
+  const contentWidth =
+    Math.min(620, Math.max(0, windowWidth - horizontalGutter * 2));
+
+  const compactLayout =
+    windowWidth < 390;
 
   const scrollRef = useRef(null);
 
@@ -349,15 +440,19 @@ export default function OnboardingScreen() {
         profile?.blood_type || '',
 
       medical_conditions:
-        profile?.medical_conditions ||
-        '',
+        formatListField(
+          profile?.medical_conditions,
+        ),
 
       current_medications:
-        profile?.current_medications ||
-        '',
+        formatListField(
+          profile?.current_medications,
+        ),
 
       allergies:
-        profile?.allergies || '',
+        formatListField(
+          profile?.allergies,
+        ),
 
       emergency_contact_name:
         profile?.emergency_contact_name ||
@@ -379,6 +474,98 @@ export default function OnboardingScreen() {
       mountedRef.current = false;
     };
   }, []);
+
+  /*
+   * Keep late-arriving backend profile values in sync without
+   * overwriting anything the user has already typed.
+   */
+  useEffect(() => {
+    if (!profile) {
+      return;
+    }
+
+    setForm(previous => ({
+      ...previous,
+
+      first_name:
+        previous.first_name ||
+        profile.first_name ||
+        user?.displayName?.split(' ')[0] ||
+        '',
+
+      last_name:
+        previous.last_name ||
+        profile.last_name ||
+        user?.displayName
+          ?.split(' ')
+          .slice(1)
+          .join(' ') ||
+        '',
+
+      date_of_birth:
+        previous.date_of_birth ||
+        formatDateOfBirth(profile.date_of_birth),
+
+      gender:
+        previous.gender ||
+        profile.gender ||
+        '',
+
+      height_cm:
+        previous.height_cm ||
+        (profile.height_cm !== null &&
+        profile.height_cm !== undefined
+          ? String(profile.height_cm)
+          : ''),
+
+      weight_kg:
+        previous.weight_kg ||
+        (profile.weight_kg !== null &&
+        profile.weight_kg !== undefined
+          ? String(profile.weight_kg)
+          : ''),
+
+      blood_type:
+        previous.blood_type ||
+        profile.blood_type ||
+        '',
+
+      medical_conditions:
+        previous.medical_conditions ||
+        formatListField(profile.medical_conditions),
+
+      current_medications:
+        previous.current_medications ||
+        formatListField(profile.current_medications),
+
+      allergies:
+        previous.allergies ||
+        formatListField(profile.allergies),
+
+      emergency_contact_name:
+        previous.emergency_contact_name ||
+        profile.emergency_contact_name ||
+        '',
+
+      emergency_contact_phone:
+        previous.emergency_contact_phone ||
+        profile.emergency_contact_phone ||
+        '',
+
+      emergency_contact_relation:
+        previous.emergency_contact_relation ||
+        profile.emergency_contact_relation ||
+        '',
+    }));
+
+    setPhotoUri(previous =>
+      previous ||
+      profile.profile_photo_url ||
+      null,
+    );
+
+  }, [profile, user]);
+
 
   /*
    * Check notification permission
@@ -539,31 +726,11 @@ export default function OnboardingScreen() {
       if (
         currentKey === 'basic'
       ) {
-        if (
-          !form.first_name.trim()
-        ) {
-          Alert.alert(
-            'First name required',
-            'Please enter your first name to continue.',
-          );
-
-          return false;
-        }
-
-        if (
-          !form.last_name.trim()
-        ) {
-          Alert.alert(
-            'Last name required',
-            'Please enter your last name to continue.',
-          );
-
-          return false;
-        }
-
-        if (
-          form.date_of_birth.trim()
-        ) {
+        /*
+         * Every onboarding field is optional. Validate only when
+         * a value is actually supplied by the user.
+         */
+        if (form.date_of_birth.trim()) {
           const normalized =
             normalizeDateOfBirth(
               form.date_of_birth,
@@ -572,7 +739,7 @@ export default function OnboardingScreen() {
           if (!normalized) {
             Alert.alert(
               'Invalid date of birth',
-              'Please use DD/MM/YYYY, for example 18/09/2003.',
+              'Use DD/MM/YYYY, for example 18/09/2003, or leave it blank.',
             );
 
             return false;
@@ -666,8 +833,7 @@ export default function OnboardingScreen() {
         nextStepValue >= STEPS.length ||
         nextStepValue === step ||
         saving ||
-        photoUploading ||
-        notificationsLoading
+        photoUploading
       ) {
         return;
       }
@@ -698,6 +864,42 @@ export default function OnboardingScreen() {
         step - 1,
       );
     }
+  };
+
+  const handleWrongAccount = async () => {
+    if (saving || photoUploading) {
+      return;
+    }
+
+    Alert.alert(
+      'Switch account?',
+      'You will be signed out and returned to Login. From there you can choose the correct Google account or open Sign Up.',
+      [
+        {
+          text: 'Stay here',
+          style: 'cancel',
+        },
+        {
+          text: 'Switch account',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await logout();
+            } catch (error) {
+              console.error(
+                'Onboarding account switch error:',
+                error,
+              );
+
+              Alert.alert(
+                'Unable to sign out',
+                'Please try again.',
+              );
+            }
+          },
+        },
+      ],
+    );
   };
 
   /*
@@ -916,9 +1118,11 @@ export default function OnboardingScreen() {
    */
   const finishOnboarding =
     async () => {
-      if (
-        !validateCurrentStep()
-      ) {
+      if (saving || photoUploading) {
+        return;
+      }
+
+      if (!validateCurrentStep()) {
         return;
       }
 
@@ -935,19 +1139,68 @@ export default function OnboardingScreen() {
               )
             : null;
 
+        if (enteredDate && !dateOfBirth) {
+          throw new Error(
+            'Please enter a valid date of birth, for example 18/09/2003.',
+          );
+        }
+
+        const heightText =
+          form.height_cm.trim();
+
+        const weightText =
+          form.weight_kg.trim();
+
         const height =
-          form.height_cm.trim()
-            ? Number(
-                form.height_cm,
-              )
+          heightText
+            ? Number(heightText)
             : null;
 
         const weight =
-          form.weight_kg.trim()
-            ? Number(
-                form.weight_kg,
-              )
+          weightText
+            ? Number(weightText)
             : null;
+
+        if (
+          height !== null &&
+          (!Number.isFinite(height) ||
+            height < 30 ||
+            height > 300)
+        ) {
+          throw new Error(
+            'Please enter a valid height between 30 and 300 cm, or leave it blank.',
+          );
+        }
+
+        if (
+          weight !== null &&
+          (!Number.isFinite(weight) ||
+            weight < 1 ||
+            weight > 500)
+        ) {
+          throw new Error(
+            'Please enter a valid weight between 1 and 500 kg, or leave it blank.',
+          );
+        }
+
+        const medicalConditions =
+          parseListField(
+            form.medical_conditions,
+          );
+
+        const currentMedications =
+          parseListField(
+            form.current_medications,
+          );
+
+        const allergies =
+          parseListField(
+            form.allergies,
+          );
+
+        const profilePhotoUrl =
+          photoUri ||
+          '';
 
         await saveProfile({
           first_name:
@@ -957,7 +1210,7 @@ export default function OnboardingScreen() {
             form.last_name.trim(),
 
           profile_photo_url:
-            photoUri || null,
+            profilePhotoUrl,
 
           date_of_birth:
             dateOfBirth,
@@ -977,13 +1230,13 @@ export default function OnboardingScreen() {
               .toUpperCase(),
 
           medical_conditions:
-            form.medical_conditions.trim(),
+            medicalConditions,
 
           current_medications:
-            form.current_medications.trim(),
+            currentMedications,
 
           allergies:
-            form.allergies.trim(),
+            allergies,
 
           emergency_contact_name:
             form.emergency_contact_name.trim(),
@@ -1000,21 +1253,17 @@ export default function OnboardingScreen() {
       } catch (error) {
         console.error(
           'Onboarding save error:',
-          error?.response
-            ?.data || error,
+          error?.response?.data || error,
         );
 
         Alert.alert(
           'Unable to save profile',
-          error?.response?.data
-            ? JSON.stringify(
-                error.response.data,
-              )
-            : error?.message ||
-                'Please check your information and try again.',
+          getApiErrorMessage(error),
         );
       } finally {
-        setSaving(false);
+        if (mountedRef.current) {
+          setSaving(false);
+        }
       }
     };
 
@@ -1027,6 +1276,14 @@ export default function OnboardingScreen() {
   ) => {
     const isFocused =
       focusedField === field;
+
+    const {
+      minHeight,
+      ...textInputOptions
+    } = options;
+
+    const isMultiline =
+      textInputOptions.multiline === true;
 
     return (
       <View
@@ -1051,28 +1308,31 @@ export default function OnboardingScreen() {
             {label}
           </Text>
 
-          {(
-            field ===
-              'date_of_birth' ||
-            field === 'gender'
-          ) && (
-            <Text
-              style={[
-                styles.optionalLabel,
-                {
-                  color:
-                    theme.textSecondary,
-                },
-              ]}
-            >
-              Optional
-            </Text>
-          )}
+          <Text
+            style={[
+              styles.optionalLabel,
+              {
+                color:
+                  theme.textSecondary,
+              },
+            ]}
+          >
+            Optional
+          </Text>
         </View>
 
         <TextInput
           style={[
             styles.input,
+            isMultiline
+              ? styles.textArea
+              : null,
+            minHeight
+              ? { minHeight }
+              : null,
+            isFocused
+              ? styles.inputFocused
+              : null,
             {
               backgroundColor:
                 isFocused
@@ -1095,7 +1355,9 @@ export default function OnboardingScreen() {
             theme.textSecondary
           }
           value={
-            form[field]
+            typeof form[field] === 'string'
+              ? form[field]
+              : formatListField(form[field])
           }
           onFocus={() =>
             setFocusedField(
@@ -1113,7 +1375,14 @@ export default function OnboardingScreen() {
               value,
             )
           }
-          {...options}
+          autoCorrect={
+            textInputOptions.autoCorrect ?? false
+          }
+          autoCapitalize={
+            textInputOptions.autoCapitalize ?? 'sentences'
+          }
+          blurOnSubmit={!isMultiline}
+          {...textInputOptions}
         />
 
         {helperText ? (
@@ -2137,6 +2406,17 @@ export default function OnboardingScreen() {
         },
       ]}
     >
+      <StatusBar
+        barStyle={
+          isDark
+            ? 'light-content'
+            : 'dark-content'
+        }
+        backgroundColor={
+          theme.background
+        }
+      />
+
       <KeyboardAvoidingView
         style={
           styles.container
@@ -2149,9 +2429,13 @@ export default function OnboardingScreen() {
       >
         {/* HEADER */}
         <View
-          style={
-            styles.header
-          }
+          style={[
+            styles.header,
+            {
+              width: contentWidth,
+              alignSelf: 'center',
+            },
+          ]}
         >
           <View>
             <Text
@@ -2229,17 +2513,67 @@ export default function OnboardingScreen() {
           </View>
         </View>
 
+        <TouchableOpacity
+          style={[
+            styles.accountSwitchButton,
+            {
+              backgroundColor: theme.card,
+              borderColor: theme.border,
+            },
+          ]}
+          onPress={handleWrongAccount}
+          disabled={saving || photoUploading}
+          activeOpacity={0.78}
+        >
+          <Ionicons
+            name="swap-horizontal-outline"
+            size={16}
+            color={theme.accent}
+          />
+
+          <Text
+            style={[
+              styles.accountSwitchText,
+              {
+                color: theme.textSecondary,
+              },
+            ]}
+          >
+            Signed in with the wrong account?
+          </Text>
+
+          <Text
+            style={[
+              styles.accountSwitchAction,
+              {
+                color: theme.textPrimary,
+              },
+            ]}
+          >
+            Use a different account
+          </Text>
+        </TouchableOpacity>
+
         {/* PROGRESS */}
         <View
           style={[
-            styles.progressTrack,
+            styles.progressWrap,
             {
-              backgroundColor:
-                theme.border,
+              width: contentWidth,
+              alignSelf: 'center',
             },
           ]}
         >
-          <Animated.View
+          <View
+            style={[
+              styles.progressTrack,
+              {
+                backgroundColor:
+                  theme.border,
+              },
+            ]}
+          >
+            <Animated.View
             style={[
               styles.progressFill,
               {
@@ -2262,31 +2596,43 @@ export default function OnboardingScreen() {
                   ),
               },
             ]}
-          />
+            />
+          </View>
         </View>
 
         <ScrollView
           ref={scrollRef}
-          showsVerticalScrollIndicator={
-            false
-          }
+          style={styles.scrollView}
+          showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={
-            styles.scrollContent
+          keyboardDismissMode={
+            Platform.OS === 'ios'
+              ? 'interactive'
+              : 'on-drag'
           }
+          contentContainerStyle={[
+            styles.scrollContent,
+            {
+              paddingHorizontal: 0,
+            },
+          ]}
         >
           <Animated.View
-            style={{
-              opacity:
-                fadeAnim,
+            style={[
+              styles.contentColumn,
+              {
+                width: contentWidth,
+                opacity:
+                  fadeAnim,
 
-              transform: [
-                {
-                  translateY:
-                    slideAnim,
-                },
-              ],
-            }}
+                transform: [
+                  {
+                    translateY:
+                      slideAnim,
+                  },
+                ],
+              },
+            ]}
           >
             {/* STEP IDENTITY */}
             <View
@@ -2396,6 +2742,15 @@ export default function OnboardingScreen() {
             },
           ]}
         >
+          <View
+            style={[
+              styles.footerInner,
+              {
+                width: contentWidth,
+                alignSelf: 'center',
+              },
+            ]}
+          >
           {step > 0 ? (
             <TouchableOpacity
               style={[
@@ -2413,8 +2768,7 @@ export default function OnboardingScreen() {
               }
               disabled={
                 saving ||
-                photoUploading ||
-                notificationsLoading
+                photoUploading
               }
               activeOpacity={
                 0.8
@@ -2445,8 +2799,7 @@ export default function OnboardingScreen() {
 
                 opacity:
                   saving ||
-                  photoUploading ||
-                  notificationsLoading
+                  photoUploading
                     ? 0.65
                     : 1,
               },
@@ -2458,8 +2811,7 @@ export default function OnboardingScreen() {
             }
             disabled={
               saving ||
-              photoUploading ||
-              notificationsLoading
+              photoUploading
             }
             activeOpacity={
               0.84
@@ -2472,18 +2824,15 @@ export default function OnboardingScreen() {
             >
               {photoUploading
                 ? 'Uploading...'
-                : notificationsLoading
-                  ? 'Checking...'
-                  : saving
-                    ? 'Saving...'
-                    : isLastStep
-                      ? 'Finish setup'
-                      : 'Continue'}
+                : saving
+                  ? 'Saving...'
+                  : isLastStep
+                    ? 'Finish setup'
+                    : 'Continue'}
             </Text>
 
             {!saving &&
-              !photoUploading &&
-              !notificationsLoading && (
+              !photoUploading && (
                 <Ionicons
                   name={
                     isLastStep
@@ -2497,6 +2846,19 @@ export default function OnboardingScreen() {
                 />
               )}
           </TouchableOpacity>
+
+          <Text
+            style={[
+              styles.footerHint,
+              {
+                color:
+                  theme.textSecondary,
+              },
+            ]}
+          >
+            You can finish now and complete optional details later in Settings.
+          </Text>
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -2505,19 +2867,17 @@ export default function OnboardingScreen() {
 
 const styles =
   StyleSheet.create({
-    safeArea: {
-      flex: 1,
-    },
+    safeArea: { flex: 1 },
+    container: { flex: 1 },
 
-    container: {
+    scrollView: {
       flex: 1,
+      minHeight: 0,
     },
 
     header: {
-      paddingHorizontal: 22,
-      paddingTop: 9,
+      paddingTop: 10,
       paddingBottom: 10,
-
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -2525,73 +2885,90 @@ const styles =
 
     brand: {
       fontSize: 19,
+      lineHeight: 23,
       fontWeight: '900',
       letterSpacing: -0.3,
     },
 
     headerSubtext: {
       fontSize: 11,
+      lineHeight: 15,
       fontWeight: '600',
       marginTop: 2,
     },
 
+    accountSwitchButton: {
+      width: '100%',
+      minHeight: 42,
+      marginTop: 2,
+      marginBottom: 10,
+      paddingHorizontal: 14,
+      paddingVertical: 9,
+      borderRadius: 14,
+      borderWidth: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 7,
+    },
+
+    accountSwitchText: {
+      fontSize: 12,
+      fontWeight: '600',
+    },
+
+    accountSwitchAction: {
+      fontSize: 12,
+      fontWeight: '800',
+    },
+
     stepBadge: {
-      minWidth: 58,
+      minWidth: 60,
       height: 36,
       paddingHorizontal: 11,
       borderRadius: 18,
       borderWidth: 1,
-
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
     },
 
-    stepBadgeText: {
-      fontSize: 13,
-      fontWeight: '800',
-    },
+    stepBadgeText: { fontSize: 13, lineHeight: 16, fontWeight: '800' },
+    stepBadgeSlash: { fontSize: 12, lineHeight: 15, marginHorizontal: 3 },
+    stepBadgeTotal: { fontSize: 12, lineHeight: 15, fontWeight: '700' },
 
-    stepBadgeSlash: {
-      fontSize: 12,
-      marginHorizontal: 3,
-    },
-
-    stepBadgeTotal: {
-      fontSize: 12,
-      fontWeight: '700',
-    },
-
+    progressWrap: {},
     progressTrack: {
       height: 4,
-      marginHorizontal: 22,
+      width: '100%',
       borderRadius: 99,
       overflow: 'hidden',
     },
-
-    progressFill: {
-      height: '100%',
-      borderRadius: 99,
-    },
+    progressFill: { height: '100%', borderRadius: 99 },
 
     scrollContent: {
-      paddingHorizontal: 22,
-      paddingTop: 28,
-      paddingBottom: 34,
+      flexGrow: 1,
+      alignItems: 'center',
+      paddingTop: 22,
+      paddingBottom: 28,
+    },
+
+    contentColumn: {
+      alignSelf: 'center',
+      width: '100%',
     },
 
     stepIdentity: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 18,
+      marginBottom: 16,
     },
 
     iconCircle: {
-      width: 62,
-      height: 62,
-      borderRadius: 21,
+      width: 58,
+      height: 58,
+      borderRadius: 19,
       borderWidth: 1,
-
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -2605,7 +2982,8 @@ const styles =
     },
 
     badgeText: {
-      fontSize: 10.5,
+      fontSize: 10,
+      lineHeight: 13,
       fontWeight: '800',
       textTransform: 'uppercase',
       letterSpacing: 0.5,
@@ -2620,16 +2998,15 @@ const styles =
 
     subtitle: {
       fontSize: 14,
-      lineHeight: 21,
-      marginTop: 9,
-      maxWidth: 370,
+      lineHeight: 20,
+      marginTop: 8,
+      maxWidth: 520,
     },
 
-    formContainer: {
-      marginTop: 28,
-    },
+    formContainer: { marginTop: 22, width: '100%' },
 
     sectionCard: {
+      width: '100%',
       borderRadius: 20,
       borderWidth: 1,
       padding: 18,
@@ -2638,97 +3015,94 @@ const styles =
     sectionHeader: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 20,
+      marginBottom: 19,
     },
 
     sectionIcon: {
       width: 42,
       height: 42,
       borderRadius: 13,
-
       alignItems: 'center',
       justifyContent: 'center',
+      flexShrink: 0,
     },
 
     sectionHeaderText: {
       flex: 1,
+      minWidth: 0,
       marginLeft: 11,
     },
 
-    sectionCardTitle: {
-      fontSize: 15,
-      fontWeight: '800',
-    },
-
-    sectionCardSubtitle: {
-      fontSize: 11.5,
-      lineHeight: 17,
-      marginTop: 2,
-    },
-
-    inputGroup: {
-      marginBottom: 15,
-    },
+    sectionCardTitle: { fontSize: 15, lineHeight: 19, fontWeight: '800' },
+    sectionCardSubtitle: { fontSize: 11.5, lineHeight: 17, marginTop: 3 },
+    inputGroup: { marginBottom: 14 },
 
     inputLabelRow: {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
+      minHeight: 18,
       marginBottom: 6,
     },
 
     inputLabel: {
+      flex: 1,
       fontSize: 11.5,
+      lineHeight: 16,
       fontWeight: '800',
     },
 
     optionalLabel: {
       fontSize: 10,
+      lineHeight: 13,
       fontWeight: '600',
+      marginLeft: 10,
     },
 
     input: {
+      width: '100%',
       minHeight: 50,
       borderRadius: 14,
       borderWidth: 1,
       paddingHorizontal: 14,
+      paddingVertical: 0,
       fontSize: 14,
+      lineHeight: 20,
     },
 
-    inputHelper: {
-      fontSize: 10.5,
-      lineHeight: 15,
-      marginTop: 5,
+    inputFocused: { borderWidth: 1 },
+
+    textArea: {
+      minHeight: 92,
+      paddingTop: 13,
+      paddingBottom: 13,
+      lineHeight: 20,
     },
+
+    inputHelper: { fontSize: 10.5, lineHeight: 15, marginTop: 5 },
 
     photoStep: {
+      width: '100%',
       alignItems: 'center',
+      paddingTop: 4,
     },
 
     profilePhotoRing: {
-      width: 182,
-      height: 182,
-      borderRadius: 91,
+      width: 176,
+      height: 176,
+      borderRadius: 88,
       borderWidth: 3,
       padding: 4,
-
       alignItems: 'center',
       justifyContent: 'center',
-
       overflow: 'hidden',
     },
 
-    profilePhoto: {
-      width: '100%',
-      height: '100%',
-      borderRadius: 87,
-    },
-
+    profilePhoto: { width: '100%', height: '100%', borderRadius: 84 },
     profilePhotoPlaceholder: {
       width: '100%',
       height: '100%',
-      borderRadius: 87,
-
+      borderRadius: 84,
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -2739,12 +3113,8 @@ const styles =
       right: 5,
       top: 5,
       bottom: 5,
-
-      borderRadius: 87,
-
-      backgroundColor:
-        'rgba(10, 15, 26, 0.58)',
-
+      borderRadius: 84,
+      backgroundColor: 'rgba(10, 15, 26, 0.58)',
       alignItems: 'center',
       justifyContent: 'center',
     },
@@ -2752,57 +3122,49 @@ const styles =
     photoOverlayText: {
       color: '#FFFFFF',
       fontSize: 11,
+      lineHeight: 14,
       fontWeight: '800',
       marginTop: 6,
     },
 
     photoStatusChip: {
-      marginTop: 16,
+      marginTop: 14,
       paddingHorizontal: 12,
       paddingVertical: 7,
-
       borderRadius: 10,
       borderWidth: 1,
-
       flexDirection: 'row',
       alignItems: 'center',
       gap: 6,
     },
 
-    photoStatusText: {
-      fontSize: 11,
-      fontWeight: '700',
-    },
+    photoStatusText: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
 
     primaryWideButton: {
       width: '100%',
       minHeight: 50,
-      marginTop: 18,
+      marginTop: 17,
       paddingHorizontal: 18,
-
       borderRadius: 14,
-
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
-
       gap: 8,
     },
 
     primaryWideButtonText: {
       color: BRAND.darkText,
       fontSize: 13.5,
+      lineHeight: 18,
       fontWeight: '900',
     },
 
     securityNote: {
       width: '100%',
-      marginTop: 14,
+      marginTop: 13,
       padding: 13,
-
       borderRadius: 14,
       borderWidth: 1,
-
       flexDirection: 'row',
       alignItems: 'flex-start',
     },
@@ -2818,33 +3180,27 @@ const styles =
       fontSize: 11,
       lineHeight: 17,
       textAlign: 'center',
-
-      maxWidth: 315,
-      marginTop: 13,
+      maxWidth: 360,
+      marginTop: 12,
     },
 
-    notificationStep: {
-      width: '100%',
-    },
+    notificationStep: { width: '100%' },
 
     notificationHero: {
       width: '100%',
       borderRadius: 22,
       borderWidth: 1,
       padding: 22,
-
       alignItems: 'center',
     },
 
     notificationHeroIcon: {
-      width: 78,
-      height: 78,
-      borderRadius: 25,
-
+      width: 76,
+      height: 76,
+      borderRadius: 24,
       alignItems: 'center',
       justifyContent: 'center',
-
-      marginBottom: 18,
+      marginBottom: 17,
     },
 
     notificationHeroTitle: {
@@ -2859,13 +3215,10 @@ const styles =
       lineHeight: 19,
       textAlign: 'center',
       marginTop: 9,
-      maxWidth: 315,
+      maxWidth: 430,
     },
 
-    notificationBenefits: {
-      width: '100%',
-      marginTop: 19,
-    },
+    notificationBenefits: { width: '100%', marginTop: 18 },
 
     notificationBenefit: {
       flexDirection: 'row',
@@ -2877,27 +3230,20 @@ const styles =
       width: 20,
       height: 20,
       borderRadius: 10,
-
       alignItems: 'center',
       justifyContent: 'center',
-
       marginRight: 9,
+      flexShrink: 0,
     },
 
-    benefitText: {
-      flex: 1,
-      fontSize: 12,
-      lineHeight: 18,
-    },
+    benefitText: { flex: 1, fontSize: 12, lineHeight: 18 },
 
     permissionNote: {
       width: '100%',
-      marginTop: 14,
+      marginTop: 13,
       padding: 13,
-
       borderRadius: 14,
       borderWidth: 1,
-
       flexDirection: 'row',
       alignItems: 'flex-start',
     },
@@ -2912,12 +3258,10 @@ const styles =
     infoBox: {
       flexDirection: 'row',
       alignItems: 'flex-start',
-
       borderRadius: 14,
       borderWidth: 1,
-
       padding: 13,
-      marginTop: 14,
+      marginTop: 13,
     },
 
     infoText: {
@@ -2931,8 +3275,7 @@ const styles =
       borderRadius: 15,
       borderWidth: 1,
       padding: 14,
-      marginTop: 14,
-
+      marginTop: 13,
       flexDirection: 'row',
       alignItems: 'flex-start',
     },
@@ -2945,50 +3288,65 @@ const styles =
     },
 
     footer: {
+      flexShrink: 0,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      paddingTop: 10,
+      paddingBottom: 10,
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: -2 },
+      shadowOpacity: 0.06,
+      shadowRadius: 8,
+      elevation: 7,
+      zIndex: 10,
+    },
+
+    footerInner: {
       flexDirection: 'row',
       alignItems: 'center',
-
-      paddingHorizontal: 22,
-      paddingTop: 10,
-      paddingBottom: 12,
-
-      borderTopWidth: 1,
+      flexWrap: 'wrap',
     },
 
     backButton: {
       width: 50,
       height: 50,
-
       borderRadius: 15,
       borderWidth: 1,
-
       alignItems: 'center',
       justifyContent: 'center',
-
       marginRight: 10,
+      flexShrink: 0,
     },
 
     backPlaceholder: {
       width: 50,
+      height: 50,
       marginRight: 10,
+      flexShrink: 0,
     },
 
     continueButton: {
       flex: 1,
+      minWidth: 0,
       height: 50,
-
       borderRadius: 15,
-
       flexDirection: 'row',
       justifyContent: 'center',
       alignItems: 'center',
-
       gap: 8,
     },
 
     continueText: {
       color: BRAND.darkText,
       fontSize: 14,
+      lineHeight: 18,
       fontWeight: '900',
+    },
+
+    footerHint: {
+      width: '100%',
+      fontSize: 10.5,
+      lineHeight: 15,
+      textAlign: 'center',
+      marginTop: 7,
     },
   });

@@ -2,7 +2,7 @@
   "expo": {
     "name": "CareSense AI",
     "slug": "caresense-ai",
-    "version": "1.1.0",
+    "version": "1.1.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "caresense-ai",
@@ -18,34 +18,47 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
+
+      "googleServicesFile": "./google-services.json",
+
+      "softwareKeyboardLayoutMode": "resize",
+
       "edgeToEdgeEnabled": true,
+
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.frontend"
+
+      "package": "com.caresenseai.app"
     },
     "web": {
       "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
+      "@react-native-firebase/app",
+      "@react-native-firebase/app-check",
+
       [
         "expo-splash-screen",
         {
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#F0FAFF",
           "dark": {
-            "backgroundColor": "#000000"
+            "backgroundColor": "#07131C"
           }
         }
       ],
+
       [
         "expo-notifications",
         {
           "color": "#00D4C5",
           "defaultChannel": "caresense"
         }
-      ]
+      ],
+
+      "@react-native-google-signin/google-signin"
     ],
     "experiments": {
       "typedRoutes": true,

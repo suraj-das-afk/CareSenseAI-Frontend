@@ -1,0 +1,76 @@
+{
+  "project_info": {
+    "project_number": "289681245499",
+    "project_id": "caresenseai-1953b",
+    "storage_bucket": "caresenseai-1953b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:289681245499:android:40744b101997ab59a4631e",
+        "android_client_info": {
+          "package_name": "com.anonymous.frontend"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "289681245499-214bah3rc0bbs6486t6sosbgrrd2n6kt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkOpNCJfv8abaqw7Yji5q-yxa5s2RtTfo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "289681245499-214bah3rc0bbs6486t6sosbgrrd2n6kt.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:289681245499:android:99d00e842652065da4631e",
+        "android_client_info": {
+          "package_name": "com.caresenseai.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "289681245499-ojh3h7efns20ta04ua8fg43iub9nu7q8.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.caresenseai.app",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "289681245499-214bah3rc0bbs6486t6sosbgrrd2n6kt.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDkOpNCJfv8abaqw7Yji5q-yxa5s2RtTfo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "289681245499-214bah3rc0bbs6486t6sosbgrrd2n6kt.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -3,11 +3,12 @@ import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { auth } from '../config/firebase';
+import { getAppCheckToken } from '../config/appCheck';
 
 const API_URL = __DEV__
   ? (
       Platform.OS === 'android'
-        ? 'http://10.151.61.80:8000/api/'
+        ? 'http://10.115.161.80:8000/api/'
         : 'http://127.0.0.1:8000/api/'
     )
   : 'https://caresenseai-backend.onrender.com/api/';
@@ -20,17 +21,59 @@ const api = axios.create({
 });
 
 /* ============================================================
+   HELPER
+============================================================ */
+export const clearDashboardCache = () => {
+  dashboardCache.clear();
+  dashboardRequests.clear();
+};
+
+/* ============================================================
    AUTH TOKEN
 ============================================================ */
 
 api.interceptors.request.use(async config => {
   const user = auth.currentUser;
 
-  if (user) {
-    const token = await user.getIdToken();
+  config.headers =
+    config.headers || {};
 
-    config.headers = config.headers || {};
-    config.headers.Authorization = `Bearer ${token}`;
+  /*
+   * Firebase Authentication
+   */
+  if (user) {
+    const token =
+      await user.getIdToken();
+
+    config.headers.Authorization =
+      `Bearer ${token}`;
+  }
+
+  /*
+   * Firebase App Check
+   *
+   * This is sent to our Django backend
+   * using the standard Firebase header.
+   */
+  let appCheckToken = null;
+
+  try {
+    appCheckToken =
+      await getAppCheckToken();
+  } catch (appCheckError) {
+    if (__DEV__) {
+      console.warn(
+        'Firebase App Check is unavailable in development. Continuing without App Check token.',
+      );
+    } else {
+      throw appCheckError;
+    }
+  }
+
+  if (appCheckToken) {
+    config.headers[
+      'X-Firebase-AppCheck'
+    ] = appCheckToken;
   }
 
   return config;
@@ -49,44 +92,194 @@ export const submitSymptoms = async (
   try {
     void userId;
 
-    const response = await api.post('ai/triage/', {
-      symptoms: symptomsText,
-      clarifications,
-      patient_context: patientContext,
-    });
+    const response =
+      await api.post(
+        'ai/triage/',
+        {
+          symptoms:
+            symptomsText,
+
+          clarifications,
+
+          patient_context:
+            patientContext,
+        },
+      );
+
+    /*
+     * A completed triage creates a persisted
+     * HealthRecord.
+     *
+     * Clarification responses normally do not.
+     */
+    if (
+      response.status === 201
+    ) {
+      clearRecordsCache();
+      clearDashboardCache();
+    }
 
     return response.data;
   } catch (error) {
-    console.error('API Error:', error);
+    console.error(
+      'API Error:',
+      error,
+    );
+
     throw error;
   }
 };
 
 /* ============================================================
+   RECORD CACHE
+============================================================ */
+
+const RECORDS_CACHE_TTL_MS = 30 * 1000;
+
+const recordsCache = new Map();
+const recordsRequests = new Map();
+
+export const clearRecordsCache = () => {
+  recordsCache.clear();
+  recordsRequests.clear();
+};
+
+
+/* ============================================================
+   RECORD CACHE KEY
+============================================================ */
+
+const getRecordsCacheKey = () => {
+  const user = auth.currentUser;
+
+  if (!user?.uid) {
+    return null;
+  }
+
+  return user.uid;
+};
+
+
+/* ============================================================
    HEALTH RECORDS
 ============================================================ */
 
-export const getRecords = async (userId = 'anonymous') => {
+export const getRecords = async (
+  userId = 'anonymous',
+  options = {},
+) => {
   try {
     void userId;
 
-    const response = await api.get('records/');
-    return response.data;
-  } catch (error) {
-    console.error('Get Records Error:', error);
-    throw error;
-  }
-};
+    const {
+      force = false,
+    } = options;
 
-export const deleteRecord = async recordId => {
-  try {
-    const response = await api.delete(
-      `records/${recordId}/delete/`,
+    const cacheKey =
+      getRecordsCacheKey();
+
+    if (!cacheKey) {
+      throw new Error(
+        'Please sign in to load your health records.',
+      );
+    }
+
+    const now = Date.now();
+
+    /* ----------------------------------------------------------
+       USE CACHE
+    ---------------------------------------------------------- */
+
+    const cached =
+      recordsCache.get(
+        cacheKey,
+      );
+
+    if (
+      !force &&
+      cached &&
+      now - cached.timestamp <
+        RECORDS_CACHE_TTL_MS
+    ) {
+      return cached.data;
+    }
+
+
+    /* ----------------------------------------------------------
+       REUSE EXISTING REQUEST
+       Prevent multiple screens from making the same request
+       simultaneously.
+    ---------------------------------------------------------- */
+
+    const existingRequest =
+      recordsRequests.get(
+        cacheKey,
+      );
+
+    if (existingRequest) {
+      return existingRequest;
+    }
+
+
+    /* ----------------------------------------------------------
+       FETCH
+    ---------------------------------------------------------- */
+
+    const request =
+      (async () => {
+        try {
+          const response =
+            await api.get(
+              'records/',
+            );
+
+          recordsCache.set(
+            cacheKey,
+            {
+              data:
+                response.data,
+
+              timestamp:
+                Date.now(),
+            },
+          );
+
+          return response.data;
+        } catch (error) {
+          console.error(
+            'Get Records Error:',
+            error,
+          );
+
+          /*
+           * Never keep failed
+           * data in cache.
+           */
+          recordsCache.delete(
+            cacheKey,
+          );
+
+          throw error;
+        } finally {
+          recordsRequests.delete(
+            cacheKey,
+          );
+        }
+      })();
+
+
+    recordsRequests.set(
+      cacheKey,
+      request,
     );
 
-    return response.data;
+    return request;
   } catch (error) {
-    console.error('Delete Record Error:', error);
+    console.error(
+      'Get Records Error:',
+      error,
+    );
+
     throw error;
   }
 };
@@ -201,25 +394,101 @@ export const openPDFReport = async recordId => {
 };
 
 /* ============================================================
+   DASHBOARD CACHE
+============================================================ */
+
+const DASHBOARD_CACHE_TTL_MS = 30 * 1000;
+
+const dashboardCache = new Map();
+const dashboardRequests = new Map();
+
+/* ============================================================
    DASHBOARD
 ============================================================ */
 
 export const getDashboard = async (
-  days = 7,
-  userId = '',
+  days = 30,
+  options = {},
 ) => {
-  try {
-    void userId;
+  const { force = false } = options;
 
-    const response = await api.get(
-      `dashboard/?days=${days}`,
-    );
+  const user = auth.currentUser;
 
-    return response.data;
-  } catch (error) {
-    console.error('Dashboard Error:', error);
-    throw error;
+  if (!user) {
+    throw new Error('Please sign in to load your dashboard.');
   }
+
+  const userKey = user.uid;
+  const cacheKey = `${userKey}:${days}`;
+
+  const now = Date.now();
+  const cached = dashboardCache.get(cacheKey);
+
+  /* ----------------------------------------------------------
+     USE SHARED CACHE
+  ---------------------------------------------------------- */
+
+  if (
+    !force &&
+    cached &&
+    now - cached.timestamp < DASHBOARD_CACHE_TTL_MS
+  ) {
+    return cached.data;
+  }
+
+  /* ----------------------------------------------------------
+     REUSE EXISTING REQUEST
+     Prevent duplicate simultaneous requests.
+  ---------------------------------------------------------- */
+
+  if (!force) {
+    const existingRequest =
+      dashboardRequests.get(cacheKey);
+
+    if (existingRequest) {
+      return existingRequest;
+    }
+  }
+
+  /* ----------------------------------------------------------
+     FETCH
+  ---------------------------------------------------------- */
+
+  const request = (async () => {
+    try {
+      const response = await api.get(
+        `dashboard/?scope=user&days=${days}`,
+      );
+
+      dashboardCache.set(cacheKey, {
+        data: response.data,
+        timestamp: Date.now(),
+      });
+
+      return response.data;
+    } catch (error) {
+      console.error(
+        'Dashboard Error:',
+        error,
+      );
+
+      /* Never keep failed data in cache. */
+      dashboardCache.delete(cacheKey);
+
+      throw error;
+    } finally {
+      dashboardRequests.delete(cacheKey);
+    }
+  })();
+
+  if (!force) {
+    dashboardRequests.set(
+      cacheKey,
+      request,
+    );
+  }
+
+  return request;
 };
 
 /* ============================================================
@@ -236,6 +505,52 @@ export const getDoctors = async (params = {}) => {
     return response.data;
   } catch (error) {
     console.error('Get Doctors Error:', error);
+    throw error;
+  }
+};
+
+/* ============================================================
+   DELETE HEALTH RECORD
+============================================================ */
+
+export const deleteRecord = async recordId => {
+  try {
+    const user = auth.currentUser;
+
+    if (!user) {
+      throw new Error(
+        'Please sign in to delete this health record.',
+      );
+    }
+
+    if (
+      recordId === null ||
+      recordId === undefined ||
+      String(recordId).trim() === ''
+    ) {
+      throw new Error(
+        'A valid health record ID is required.',
+      );
+    }
+
+    const response = await api.delete(
+      `records/${encodeURIComponent(recordId)}/delete/`,
+    );
+
+    /*
+     * The deleted record must not remain in any
+     * in-memory cache after the operation succeeds.
+     */
+    clearRecordsCache();
+    clearDashboardCache();
+
+    return response.data;
+  } catch (error) {
+    console.error(
+      'Delete Record Error:',
+      error,
+    );
+
     throw error;
   }
 };

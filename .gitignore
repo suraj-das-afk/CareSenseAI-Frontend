@@ -69,3 +69,5 @@ android/.gradle/
 
 expo-env.d.ts
 # @end expo-cli
+# Expo generated local config
+expo-config.json

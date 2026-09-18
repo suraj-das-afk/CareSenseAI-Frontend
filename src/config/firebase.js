@@ -7,13 +7,13 @@ import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBODX7DXq1gQQHrmCHKtmIGG57UJjylxks",
-  authDomain: "caresenseai-4b558.firebaseapp.com",
-  projectId: "caresenseai-4b558",
-  storageBucket: "caresenseai-4b558.firebasestorage.app",
-  messagingSenderId: "1007381516985",
-  appId: "1:1007381516985:web:5b39e5e614416158820168",
-  measurementId: "G-T2RZKS8V9W"
+  apiKey: "AIzaSyC6ne3Z7NdBj0iVT4j6Jx-p6erDFp1Vw0M",
+  authDomain: "caresenseai-1953b.firebaseapp.com",
+  projectId: "caresenseai-1953b",
+  storageBucket: "caresenseai-1953b.firebasestorage.app",
+  messagingSenderId: "289681245499",
+  appId: "1:289681245499:web:5cf65b29f8da31fea4631e",
+  measurementId: "G-3CZFJ73MKJ"
 };
 
 const app = initializeApp(firebaseConfig);

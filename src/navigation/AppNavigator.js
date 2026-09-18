@@ -6,25 +6,20 @@ import {
   TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
-
 import {
   createStackNavigator,
   TransitionPresets,
 } from '@react-navigation/stack';
-
 import Ionicons from '@expo/vector-icons/Ionicons';
-
 import { AuthContext } from '../context/AuthContext';
 
-// Auth
+// Auth Screens
 import LoginScreen from '../screens/LoginScreen';
 import SignupScreen from '../screens/SignupScreen';
 
-// Onboarding
-import OnboardingScreen from '../screens/OnboardingScreen';
-
-// Main App
+// Main App Tabs
 import MainTabs from './MainTabs';
+import OnboardingScreen from '../screens/OnboardingScreen';
 
 // Secondary Screens
 import SymptomCheckerScreen from '../screens/SymptomCheckerScreen';
@@ -34,138 +29,93 @@ import DoctorsScreen from '../screens/DoctorsScreen';
 import BookAppointmentScreen from '../screens/BookAppointmentScreen';
 import MedicationScreen from '../screens/MedicationScreen';
 
-
-const Stack =
-  createStackNavigator();
-
+const Stack = createStackNavigator();
 
 export default function AppNavigator() {
-
   const {
     user,
     loading,
-
     profile,
     profileLoading,
-
+    onboardingCompleted,
     isDarkMode,
-
     isAppLocked,
     authenticateBiometricsManually,
   } = useContext(AuthContext);
 
+  const headerBackground = isDarkMode
+    ? '#0A0F1A'
+    : '#FFFFFF';
 
-  const headerBackground =
-    isDarkMode
-      ? '#0A0F1A'
-      : '#FFFFFF';
+  const headerText = isDarkMode
+    ? '#FFFFFF'
+    : '#111827';
 
-  const headerText =
-    isDarkMode
-      ? '#FFFFFF'
-      : '#111827';
+  const screenBackground = isDarkMode
+    ? '#0A0F1A'
+    : '#F8F9FB';
 
-  const screenBackground =
-    isDarkMode
-      ? '#0A0F1A'
-      : '#F8F9FB';
-
-
-  /* ==========================================================
-     AUTHENTICATION LOADING
-  ========================================================== */
-
+  /*
+   * Wait for Firebase authentication to restore.
+   */
   if (loading) {
-
+    // The global animated splash owns startup presentation.
+    // Keep the navigator visually quiet while Firebase restores the session.
     return (
       <View
         style={[
           styles.center,
           {
-            backgroundColor:
-              screenBackground,
+            backgroundColor: screenBackground,
           },
         ]}
-      >
-
-        <ActivityIndicator
-          size="large"
-          color="#00D4C5"
-        />
-
-      </View>
+      />
     );
   }
 
-
-  /* ==========================================================
-     BACKEND PROFILE LOADING
-  ========================================================== */
-
+  /*
+   * Wait for the backend profile before deciding whether
+   * this authenticated user needs onboarding.
+   *
+   * This prevents:
+   * user exists → profile still loading → Home opens
+   */
   if (
     user &&
-    profileLoading &&
     !profile
   ) {
-
     return (
       <View
         style={[
           styles.center,
           {
-            backgroundColor:
-              screenBackground,
+            backgroundColor: screenBackground,
           },
         ]}
-      >
-
-        <ActivityIndicator
-          size="large"
-          color="#00D4C5"
-        />
-
-        <Text
-          style={[
-            styles.loadingText,
-            {
-              color:
-                headerText,
-            },
-          ]}
-        >
-          Loading your CareSense profile...
-        </Text>
-
-      </View>
+      />
     );
   }
 
-
-  /* ==========================================================
-     BIOMETRIC LOCK
-  ========================================================== */
-
+  /*
+   * BIOMETRIC LOCK SCREEN INTERCEPTOR
+   */
   if (
     user &&
     isAppLocked
   ) {
-
     return (
       <View
         style={[
           styles.lockContainer,
           {
             backgroundColor:
-              screenBackground,
+              isDarkMode
+                ? '#0A0F1A'
+                : '#F8F9FB',
           },
         ]}
       >
-
-        <View
-          style={
-            styles.iconCircle
-          }
-        >
+        <View style={styles.iconCircle}>
           <Ionicons
             name="lock-closed"
             size={48}
@@ -173,19 +123,19 @@ export default function AppNavigator() {
           />
         </View>
 
-
         <Text
           style={[
             styles.lockTitle,
             {
               color:
-                headerText,
+                isDarkMode
+                  ? '#FFFFFF'
+                  : '#111827',
             },
           ]}
         >
           CareSense AI Protected
         </Text>
-
 
         <Text
           style={[
@@ -198,20 +148,15 @@ export default function AppNavigator() {
             },
           ]}
         >
-          Biometric verification required to
-          access your medical records.
+          Biometric verification required to access your medical records.
         </Text>
 
-
         <TouchableOpacity
-          style={
-            styles.unlockBtn
-          }
+          style={styles.unlockBtn}
           onPress={
             authenticateBiometricsManually
           }
         >
-
           <Ionicons
             name="finger-print-outline"
             size={22}
@@ -221,24 +166,13 @@ export default function AppNavigator() {
             }}
           />
 
-          <Text
-            style={
-              styles.unlockBtnText
-            }
-          >
+          <Text style={styles.unlockBtnText}>
             Unlock with Biometrics
           </Text>
-
         </TouchableOpacity>
-
       </View>
     );
   }
-
-
-  /* ==========================================================
-     ROOT NAVIGATION
-  ========================================================== */
 
   return (
     <Stack.Navigator
@@ -246,9 +180,7 @@ export default function AppNavigator() {
         headerStyle: {
           backgroundColor:
             headerBackground,
-
           elevation: 0,
-
           shadowOpacity: 0,
         },
 
@@ -257,8 +189,7 @@ export default function AppNavigator() {
 
         headerTitleStyle: {
           fontWeight: '700',
-          color:
-            headerText,
+          color: headerText,
         },
 
         cardStyle: {
@@ -266,79 +197,47 @@ export default function AppNavigator() {
             screenBackground,
         },
 
+        // Smooth slide & fade animation across transitions
         ...TransitionPresets.SlideFromRightIOS,
       }}
     >
-
-      {/* ====================================================
-          AUTH
-      ==================================================== */}
-
       {user == null ? (
-
         <>
           <Stack.Screen
             name="Login"
-            component={
-              LoginScreen
-            }
+            component={LoginScreen}
             options={{
-              headerShown:
-                false,
+              headerShown: false,
             }}
           />
 
           <Stack.Screen
             name="Signup"
-            component={
-              SignupScreen
-            }
+            component={SignupScreen}
             options={{
-              headerShown:
-                false,
+              headerShown: false,
             }}
           />
         </>
-
-      ) : !profile?.onboarding_completed ? (
-
-        /* ==================================================
-           ONBOARDING
-        ================================================== */
-
-        <Stack.Screen
-          name="Onboarding"
-          component={
-            OnboardingScreen
-          }
-          options={{
-            headerShown:
-              false,
-
-            gestureEnabled:
-              false,
-          }}
-        />
-
       ) : (
-
-        /* ==================================================
-           MAIN APPLICATION
-        ================================================== */
-
         <>
-
-          <Stack.Screen
-            name="MainTabs"
-            component={
-              MainTabs
-            }
-            options={{
-              headerShown:
-                false,
-            }}
-          />
-
+          {onboardingCompleted ? (
+            <Stack.Screen
+              name="MainTabs"
+              component={MainTabs}
+              options={{
+                headerShown: false,
+              }}
+            />
+          ) : (
+            <Stack.Screen
+              name="Onboarding"
+              component={OnboardingScreen}
+              options={{
+                headerShown: false,
+              }}
+            />
+          )}
 
           <Stack.Screen
             name="SymptomChecker"
@@ -346,11 +245,9 @@ export default function AppNavigator() {
               SymptomCheckerScreen
             }
             options={{
-              title:
-                'Check Symptoms',
+              title: 'Check Symptoms',
             }}
           />
-
 
           <Stack.Screen
             name="HealthRecordDetail"
@@ -358,11 +255,9 @@ export default function AppNavigator() {
               HealthRecordDetail
             }
             options={{
-              title:
-                'Analysis Result',
+              title: 'Analysis Result',
             }}
           />
-
 
           <Stack.Screen
             name="AllRecords"
@@ -370,11 +265,9 @@ export default function AppNavigator() {
               AllRecordsScreen
             }
             options={{
-              title:
-                'My Records',
+              title: 'My Records',
             }}
           />
-
 
           <Stack.Screen
             name="Doctors"
@@ -382,11 +275,9 @@ export default function AppNavigator() {
               DoctorsScreen
             }
             options={{
-              title:
-                'Find a Doctor',
+              title: 'Find a Doctor',
             }}
           />
-
 
           <Stack.Screen
             name="BookAppointment"
@@ -394,11 +285,9 @@ export default function AppNavigator() {
               BookAppointmentScreen
             }
             options={{
-              title:
-                'Book Appointment',
+              title: 'Book Appointment',
             }}
           />
-
 
           <Stack.Screen
             name="Medication"
@@ -406,89 +295,68 @@ export default function AppNavigator() {
               MedicationScreen
             }
             options={{
-              title:
-                'My Medications',
+              title: 'My Medications',
             }}
           />
-
         </>
-
       )}
-
     </Stack.Navigator>
   );
 }
 
+const styles = StyleSheet.create({
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
 
-const styles =
-  StyleSheet.create({
+  lockContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 28,
+  },
 
-    center: {
-      flex: 1,
-      justifyContent:
-        'center',
-      alignItems:
-        'center',
-    },
+  iconCircle: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor:
+      'rgba(0, 212, 197, 0.12)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor:
+      'rgba(0, 212, 197, 0.3)',
+  },
 
-    loadingText: {
-      marginTop: 12,
-      fontSize: 13,
-    },
+  lockTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
 
-    lockContainer: {
-      flex: 1,
-      justifyContent:
-        'center',
-      alignItems:
-        'center',
-      paddingHorizontal: 28,
-    },
+  lockSub: {
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 32,
+    lineHeight: 20,
+  },
 
-    iconCircle: {
-      width: 90,
-      height: 90,
-      borderRadius: 45,
-      backgroundColor:
-        'rgba(0, 212, 197, 0.12)',
-      justifyContent:
-        'center',
-      alignItems:
-        'center',
-      marginBottom: 20,
-      borderWidth: 1,
-      borderColor:
-        'rgba(0, 212, 197, 0.3)',
-    },
+  unlockBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#00D4C5',
+    paddingHorizontal: 28,
+    paddingVertical: 14,
+    borderRadius: 14,
+  },
 
-    lockTitle: {
-      fontSize: 24,
-      fontWeight: '700',
-      marginBottom: 8,
-    },
-
-    lockSub: {
-      fontSize: 14,
-      textAlign: 'center',
-      marginBottom: 32,
-      lineHeight: 20,
-    },
-
-    unlockBtn: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor:
-        '#00D4C5',
-      paddingHorizontal: 28,
-      paddingVertical: 14,
-      borderRadius: 14,
-    },
-
-    unlockBtnText: {
-      color:
-        '#0A0F1A',
-      fontSize: 15,
-      fontWeight: '700',
-    },
-
-  });
+  unlockBtnText: {
+    color: '#0A0F1A',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+});

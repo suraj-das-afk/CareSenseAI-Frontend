@@ -7,28 +7,16 @@ import AppPopup from './src/components/AppPopup';
 import AnimatedSplashScreen from './src/components/AnimatedSplashScreen';
 import AppNavigator from './src/navigation/AppNavigator';
 
-// Keep Expo's native splash visible only until React has mounted.
-// The animated React splash will then take over.
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AppContent() {
-  const { loading } = useContext(AuthContext);
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
+  useContext(AuthContext); // keep provider mounted and reactive
 
   useEffect(() => {
-    // IMPORTANT:
-    // Do not wait for the custom animation to finish before hiding
-    // Expo's native splash. Otherwise the native splash covers the
-    // entire animation and the animation appears to never run.
-    const hideNativeSplash = async () => {
-      try {
-        await SplashScreen.hideAsync();
-      } catch (error) {
-        console.warn('Native splash hide warning:', error);
-      }
-    };
-
-    hideNativeSplash();
+    // The native platform splash must hand off immediately so the
+    // React animation is visible instead of being hidden underneath it.
+    SplashScreen.hideAsync().catch(() => {});
   }, []);
 
   return (
@@ -38,7 +26,6 @@ function AppContent() {
 
       {showAnimatedSplash && (
         <AnimatedSplashScreen
-          ready={!loading}
           onFinish={() => setShowAnimatedSplash(false)}
         />
       )}

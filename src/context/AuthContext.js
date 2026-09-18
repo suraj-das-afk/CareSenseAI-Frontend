@@ -13,16 +13,26 @@ import * as LocalAuthentication from 'expo-local-authentication';
 import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithCredential,
+  GoogleAuthProvider,
+  getAdditionalUserInfo,
   signOut as firebaseSignOut,
   onAuthStateChanged,
   updateProfile,
 } from 'firebase/auth';
+
+import {
+  GoogleSignin,
+  statusCodes,
+} from '@react-native-google-signin/google-signin';
 
 import { auth } from '../config/firebase';
 
 import {
   getUserProfile,
   updateUserProfile,
+  clearRecordsCache,
+  clearDashboardCache,
 } from '../services/api';
 
 
@@ -46,15 +56,32 @@ export const AuthContext = createContext(null);
 
 export const AuthProvider = ({ children }) => {
 
+
+  useEffect(() => {
+  GoogleSignin.configure({
+    webClientId:
+      process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
+
+      offlineAccess: false,
+    });
+  }, []);
+
   /* ==========================================================
      SYSTEM / THEME
   ========================================================== */
 
   const systemColorScheme = useColorScheme();
 
-  const [isDarkMode, setIsDarkMode] = useState(
-    systemColorScheme === 'dark'
-  );
+  // Device appearance is the source of truth for the default theme.
+  // Existing saved legacy `darkTheme` values are intentionally ignored.
+  const [themeMode, setThemeMode] = useState('system');
+
+  const isDarkMode =
+    themeMode === 'dark'
+      ? true
+      : themeMode === 'light'
+        ? false
+        : systemColorScheme === 'dark';
 
 
   /* ==========================================================
@@ -104,6 +131,13 @@ export const AuthProvider = ({ children }) => {
    */
   const mountedRef = useRef(true);
 
+  /*
+   * Tracks the intent of an interactive Google flow.
+   * While this is active, the auth-state listener waits
+   * for the flow to decide whether the account is allowed.
+   */
+  const googleAuthFlowRef = useRef(null);
+
 
   /* ==========================================================
      SAFE MOUNT TRACKING
@@ -137,9 +171,9 @@ export const AuthProvider = ({ children }) => {
 
         if (
           parsed &&
-          typeof parsed.darkTheme === 'boolean'
+          ['system', 'light', 'dark'].includes(parsed.themeMode)
         ) {
-          setIsDarkMode(parsed.darkTheme);
+          setThemeMode(parsed.themeMode);
         }
 
         if (
@@ -547,20 +581,21 @@ export const AuthProvider = ({ children }) => {
            * User signed out.
            */
           if (!currentUser) {
+            /*
+            * Safety cleanup:
+            * if Firebase becomes unauthenticated for any reason,
+            * make sure no previous user's cached health data remains.
+            */
+            clearRecordsCache();
+            clearDashboardCache();
 
-            biometricCheckedForUser.current =
-              null;
+            biometricCheckedForUser.current = null;
 
             if (mountedRef.current) {
-
               setUser(null);
-
               setProfile(null);
-
               setProfileError(null);
-
               setProfileLoading(false);
-
               setIsAppLocked(false);
             }
 
@@ -568,7 +603,6 @@ export const AuthProvider = ({ children }) => {
 
             return;
           }
-
 
           /*
            * Firebase user object.
@@ -605,22 +639,27 @@ export const AuthProvider = ({ children }) => {
 
 
           /*
-           * Load persistent backend profile.
+           * Mark Firebase authentication as ready immediately.
+           * Profile loading and biometric checks continue in the
+           * background so Render/network delays can never trap the
+           * entire application on a startup spinner.
            */
-          await refreshProfile();
-
-
-          /*
-           * Check device protection.
-           */
-          await checkBiometricsOnLaunch(
-            currentUser
-          );
-
-
           if (mountedRef.current) {
             setLoading(false);
           }
+
+          /*
+           * Interactive Google login/signup decides whether this
+           * Firebase identity is allowed for the requested flow.
+           * Do not load backend profile data or trigger biometrics
+           * until that decision has completed.
+           */
+          if (googleAuthFlowRef.current) {
+            return;
+          }
+
+          void refreshProfile();
+          void checkBiometricsOnLaunch(currentUser);
         }
       );
 
@@ -773,7 +812,7 @@ export const AuthProvider = ({ children }) => {
         const result =
           await LocalAuthentication.authenticateAsync({
             promptMessage:
-              'Enable CareSense AI Protection',
+              'CareSense AI Protection',
 
             subtitle:
               'Verify your identity to enable biometric protection.',
@@ -895,6 +934,254 @@ export const AuthProvider = ({ children }) => {
       }
 
     }, []);
+
+
+  /* ==========================================================
+      GOOGLE AUTHENTICATION
+    ========================================================== */
+
+    const clearLocalAuthState = useCallback(() => {
+      /*
+      * Clear in-memory API caches first.
+      *
+      * This prevents health records or dashboard information
+      * belonging to the previous Firebase account from remaining
+      * available after logout/account switching.
+      */
+      clearRecordsCache();
+      clearDashboardCache();
+
+      biometricCheckedForUser.current = null;
+
+      if (mountedRef.current) {
+        setUser(null);
+        setProfile(null);
+        setProfileError(null);
+        setProfileLoading(false);
+        setIsAppLocked(false);
+      }
+    }, []);
+
+
+  const googleAuth = useCallback(
+    async intent => {
+      googleAuthFlowRef.current = intent;
+
+      try {
+        await GoogleSignin.hasPlayServices({
+          showPlayServicesUpdateDialog: true,
+        });
+
+        /*
+         * Clear the native Google Sign-In session before every
+         * interactive authentication. This prevents Android from
+         * silently reusing the previously selected Google account.
+         * The Google account itself remains on the device, so the
+         * next sign-in can still display the account chooser.
+         */
+        try {
+          await GoogleSignin.signOut();
+        } catch (signOutError) {
+          if (
+            signOutError?.code !==
+            statusCodes.SIGN_IN_REQUIRED
+          ) {
+            console.warn(
+              'Google native session could not be cleared before sign-in:',
+              signOutError,
+            );
+          }
+        }
+
+        const response =
+          await GoogleSignin.signIn();
+
+        if (
+          response?.type !==
+          'success'
+        ) {
+          return false;
+        }
+
+        const idToken =
+          response?.data?.idToken;
+
+        if (!idToken) {
+          throw new Error(
+            'Google did not return an ID token.',
+          );
+        }
+
+        const credential =
+          GoogleAuthProvider.credential(
+            idToken,
+          );
+
+        const userCredential =
+          await signInWithCredential(
+            auth,
+            credential,
+          );
+
+        const additionalUserInfo =
+          getAdditionalUserInfo(
+            userCredential,
+          );
+
+        const isNewUser =
+          additionalUserInfo?.isNewUser === true;
+
+        /*
+         * LOGIN is restricted to an existing CareSense account.
+         * Firebase may create the Google identity when it is new,
+         * so remove that just-created identity immediately.
+         */
+        if (
+          intent === 'login' &&
+          isNewUser
+        ) {
+          try {
+            await userCredential.user.delete();
+          } catch (deleteError) {
+            console.error(
+              'Unable to remove unregistered Google account after login attempt:',
+              deleteError,
+            );
+
+            try {
+              await firebaseSignOut(auth);
+            } catch {
+              // Best effort cleanup.
+            }
+          }
+
+          try {
+            await GoogleSignin.signOut();
+          } catch {
+            // Best effort cleanup.
+          }
+
+          clearLocalAuthState();
+
+          const error =
+            new Error(
+              'No CareSense AI account exists for this Google account. Please use Sign Up first.',
+            );
+
+          error.code =
+            'auth/google-account-not-found';
+
+          throw error;
+        }
+
+        /*
+         * SIGNUP is restricted to a brand-new Google identity.
+         * Existing CareSense accounts must use Log In.
+         */
+        if (
+          intent === 'signup' &&
+          !isNewUser
+        ) {
+          try {
+            await firebaseSignOut(auth);
+          } catch {
+            // Best effort cleanup.
+          }
+
+          try {
+            await GoogleSignin.signOut();
+          } catch {
+            // Best effort cleanup.
+          }
+
+          clearLocalAuthState();
+
+          const error =
+            new Error(
+              'That Google account already has a CareSense AI account. Please use Log In instead.',
+            );
+
+          error.code =
+            'auth/google-account-already-exists';
+
+          throw error;
+        }
+
+        /*
+         * The selected Google account is valid for the requested
+         * flow. Release the auth-flow guard before loading the
+         * backend profile and biometric protection.
+         */
+        googleAuthFlowRef.current =
+          null;
+
+        await refreshProfile();
+
+        await checkBiometricsOnLaunch(
+          userCredential.user,
+        );
+
+        return true;
+
+      } catch (error) {
+        if (
+          error?.code ===
+          statusCodes.SIGN_IN_CANCELLED
+        ) {
+          return false;
+        }
+
+        if (
+          error?.code ===
+          statusCodes.IN_PROGRESS
+        ) {
+          throw new Error(
+            'Google sign-in is already in progress.',
+          );
+        }
+
+        if (
+          error?.code ===
+          statusCodes.PLAY_SERVICES_NOT_AVAILABLE
+        ) {
+          throw new Error(
+            'Google Play Services is unavailable or needs updating.',
+          );
+        }
+
+        console.error(
+          'Google authentication error:',
+          error,
+        );
+
+        throw error;
+      } finally {
+        googleAuthFlowRef.current =
+          null;
+      }
+    },
+    [
+      refreshProfile,
+      checkBiometricsOnLaunch,
+      clearLocalAuthState,
+    ],
+  );
+
+
+  const googleLogin =
+    useCallback(
+      async () =>
+        googleAuth('login'),
+      [googleAuth],
+    );
+
+
+  const googleSignup =
+    useCallback(
+      async () =>
+        googleAuth('signup'),
+      [googleAuth],
+    );
 
 
   /* ==========================================================
@@ -1080,23 +1367,31 @@ export const AuthProvider = ({ children }) => {
 
     try {
 
+      /*
+       * Clear the native Google session as well as Firebase.
+       * This prevents the next Google authentication from
+       * silently reusing the previous Google identity.
+       */
+      try {
+        await GoogleSignin.signOut();
+      } catch (googleError) {
+        if (
+          googleError?.code !==
+          statusCodes.SIGN_IN_REQUIRED
+        ) {
+          console.warn(
+            'Google logout cleanup warning:',
+            googleError,
+          );
+        }
+      }
+
       await firebaseSignOut(auth);
 
-      biometricCheckedForUser.current =
+      googleAuthFlowRef.current =
         null;
 
-      if (mountedRef.current) {
-
-        setUser(null);
-
-        setProfile(null);
-
-        setProfileError(null);
-
-        setProfileLoading(false);
-
-        setIsAppLocked(false);
-      }
+      clearLocalAuthState();
 
     } catch (error) {
 
@@ -1108,7 +1403,7 @@ export const AuthProvider = ({ children }) => {
       throw error;
     }
 
-  }, []);
+  }, [clearLocalAuthState]);
 
 
   /* ==========================================================
@@ -1151,6 +1446,8 @@ export const AuthProvider = ({ children }) => {
     loading,
     login,
     signup,
+    googleLogin,
+    googleSignup,
     logout,
 
     /*
