@@ -3,6 +3,10 @@ package com.caresenseai.app
 import android.app.Application
 import android.content.res.Configuration
 
+import com.google.firebase.FirebaseApp
+import com.google.firebase.appcheck.FirebaseAppCheck
+import com.google.firebase.appcheck.recaptcha.RecaptchaAppCheckProviderFactory
+
 import com.facebook.react.PackageList
 import com.facebook.react.ReactApplication
 import com.facebook.react.ReactNativeApplicationEntryPoint.loadReactNative
@@ -22,10 +26,9 @@ class MainApplication : Application(), ReactApplication {
       this,
       object : DefaultReactNativeHost(this) {
         override fun getPackages(): List<ReactPackage> =
-            PackageList(this).packages.apply {
-              // Packages that cannot be autolinked yet can be added manually here, for example:
-              // add(MyReactNativePackage())
-            }
+          PackageList(this).packages.apply {
+            add(CareSenseAppCheckPackage())
+          }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"
 
@@ -40,17 +43,48 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
+
     DefaultNewArchitectureEntryPoint.releaseLevel = try {
-      ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
+      ReleaseLevel.valueOf(
+        BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase()
+      )
     } catch (e: IllegalArgumentException) {
       ReleaseLevel.STABLE
     }
+
+    if (
+      BuildConfig.CARESENSE_APP_CHECK_PROVIDER ==
+        "recaptchaEnterprise"
+    ) {
+      val siteKey =
+        BuildConfig.CARESENSE_RECAPTCHA_ENTERPRISE_SITE_KEY
+
+      if (siteKey.isNotBlank()) {
+        FirebaseApp.initializeApp(this)
+
+        FirebaseAppCheck.getInstance()
+          .installAppCheckProviderFactory(
+            RecaptchaAppCheckProviderFactory.getInstance(
+              siteKey
+            )
+          )
+      }
+    }
+
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
   }
 
-  override fun onConfigurationChanged(newConfig: Configuration) {
-    super.onConfigurationChanged(newConfig)
-    ApplicationLifecycleDispatcher.onConfigurationChanged(this, newConfig)
+  override fun onConfigurationChanged(
+    newConfig: Configuration,
+  ) {
+    super.onConfigurationChanged(
+      newConfig,
+    )
+
+    ApplicationLifecycleDispatcher.onConfigurationChanged(
+      this,
+      newConfig,
+    )
   }
 }

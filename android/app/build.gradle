@@ -96,6 +96,8 @@ android {
         versionName "1.1.2"
 
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
+        buildConfigField "String", "CARESENSE_APP_CHECK_PROVIDER", "\"${System.getenv('EXPO_PUBLIC_FIREBASE_APP_CHECK_PROVIDER') ?: ''}\""
+        buildConfigField "String", "CARESENSE_RECAPTCHA_ENTERPRISE_SITE_KEY", "\"${System.getenv('EXPO_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY') ?: ''}\""
     }
     signingConfigs {
         debug {
@@ -155,6 +157,9 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+
+    implementation platform("com.google.firebase:firebase-bom:34.19.0")
+    implementation("com.google.firebase:firebase-appcheck-recaptcha")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
