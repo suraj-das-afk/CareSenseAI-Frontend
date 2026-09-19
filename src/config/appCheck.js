@@ -20,9 +20,26 @@ const initializeCareSenseAppCheck = async () => {
     const provider =
       new ReactNativeFirebaseAppCheckProvider();
 
-    const providerName = __DEV__
-      ? 'debug'
-      : 'playIntegrity';
+    const configuredProvider =
+      process.env.EXPO_PUBLIC_FIREBASE_APP_CHECK_PROVIDER;
+
+    const providerName =
+      configuredProvider ||
+      (__DEV__ ? 'debug' : 'playIntegrity');
+
+    const debugToken =
+      providerName === 'debug'
+        ? process.env.EXPO_PUBLIC_FIREBASE_APP_CHECK_DEBUG_TOKEN
+        : undefined;
+
+    if (
+      providerName === 'debug' &&
+      !debugToken
+    ) {
+      console.warn(
+        'Firebase App Check debug token is missing.',
+      );
+    }
 
     console.log(
       `Firebase App Check provider: ${providerName}`,
@@ -31,6 +48,11 @@ const initializeCareSenseAppCheck = async () => {
     provider.configure({
       android: {
         provider: providerName,
+        ...(debugToken
+          ? {
+              debugToken,
+            }
+          : {}),
       },
     });
 
@@ -43,7 +65,8 @@ const initializeCareSenseAppCheck = async () => {
         },
       );
 
-    appCheckInstance = instance;
+    appCheckInstance =
+      instance;
 
     return instance;
   })();
@@ -56,27 +79,28 @@ const initializeCareSenseAppCheck = async () => {
   }
 };
 
-export const getAppCheckToken = async () => {
-  try {
-    const appCheck =
-      await initializeCareSenseAppCheck();
+export const getAppCheckToken =
+  async () => {
+    try {
+      const appCheck =
+        await initializeCareSenseAppCheck();
 
-    const { token } =
-      await appCheck.getToken(false);
+      const { token } =
+        await appCheck.getToken(false);
 
-    if (!token) {
-      throw new Error(
-        'Firebase App Check returned an empty token.',
+      if (!token) {
+        throw new Error(
+          'Firebase App Check returned an empty token.',
+        );
+      }
+
+      return token;
+    } catch (error) {
+      console.error(
+        'Firebase App Check Error:',
+        error,
       );
+
+      throw error;
     }
-
-    return token;
-  } catch (error) {
-    console.error(
-      'Firebase App Check Error:',
-      error,
-    );
-
-    throw error;
-  }
-};
+  };
