@@ -344,15 +344,22 @@ export const openPDFReport = async recordId => {
   const user = auth.currentUser;
 
   if (!user) {
-    throw new Error('Please sign in to download this report.');
+    throw new Error(
+      'Please sign in to download this report.',
+    );
   }
 
-  const token = await user.getIdToken();
+  const token =
+    await user.getIdToken();
 
-  const safeRecordId = String(recordId).replace(
-    /[^a-zA-Z0-9_-]/g,
-    '_',
-  );
+  const appCheckToken =
+    await getAppCheckToken();
+
+  const safeRecordId =
+    String(recordId).replace(
+      /[^a-zA-Z0-9_-]/g,
+      '_',
+    );
 
   const fileUri =
     `${FileSystem.cacheDirectory}` +
@@ -362,33 +369,51 @@ export const openPDFReport = async recordId => {
     `${API_URL}` +
     `records/${encodeURIComponent(recordId)}/pdf/`;
 
-  const result = await FileSystem.downloadAsync(
-    url,
-    fileUri,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    },
-  );
+  const result =
+    await FileSystem.downloadAsync(
+      url,
+      fileUri,
+      {
+        headers: {
+          Authorization:
+            `Bearer ${token}`,
 
-  if (result.status < 200 || result.status >= 300) {
+          'X-Firebase-AppCheck':
+            appCheckToken,
+        },
+      },
+    );
+
+  if (
+    result.status < 200 ||
+    result.status >= 300
+  ) {
     throw new Error(
       'Unable to download PDF report.',
     );
   }
 
-  if (!(await Sharing.isAvailableAsync())) {
+  if (
+    !(await Sharing.isAvailableAsync())
+  ) {
     throw new Error(
       'PDF sharing is not available on this device.',
     );
   }
 
-  await Sharing.shareAsync(result.uri, {
-    mimeType: 'application/pdf',
-    dialogTitle: 'Open CareSense report',
-    UTI: 'com.adobe.pdf',
-  });
+  await Sharing.shareAsync(
+    result.uri,
+    {
+      mimeType:
+        'application/pdf',
+
+      dialogTitle:
+        'Open CareSense report',
+
+      UTI:
+        'com.adobe.pdf',
+    },
+  );
 
   return result.uri;
 };
