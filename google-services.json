@@ -43,11 +43,11 @@
       },
       "oauth_client": [
         {
-          "client_id": "289681245499-ojh3h7efns20ta04ua8fg43iub9nu7q8.apps.googleusercontent.com",
+          "client_id": "289681245499-stjkk0q4if1s88fle5i13gogqj8d9lvu.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
             "package_name": "com.caresenseai.app",
-            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+            "certificate_hash": "999fc6d626e817561edd48475e02c0e807af8985"
           }
         },
         {
