@@ -271,11 +271,9 @@ export default function AppNavigator() {
 
           <Stack.Screen
             name="Doctors"
-            component={
-              DoctorsScreen
-            }
+            component={DoctorsScreen}
             options={{
-              title: 'Find a Doctor',
+              headerShown: false,
             }}
           />
 

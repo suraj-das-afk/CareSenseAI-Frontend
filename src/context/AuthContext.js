@@ -902,11 +902,18 @@ export const AuthProvider = ({ children }) => {
 
   const toggleGlobalTheme =
     useCallback(async value => {
+      const nextThemeMode =
+        typeof value === 'boolean'
+          ? value
+            ? 'dark'
+            : 'light'
+          : ['system', 'light', 'dark'].includes(value)
+            ? value
+            : 'system';
 
-      setIsDarkMode(value);
+      setThemeMode(nextThemeMode);
 
       try {
-
         const existing =
           await AsyncStorage.getItem(
             STORAGE_KEY
@@ -921,12 +928,11 @@ export const AuthProvider = ({ children }) => {
           STORAGE_KEY,
           JSON.stringify({
             ...parsed,
-            darkTheme: value,
+            themeMode: nextThemeMode,
           })
         );
 
       } catch (error) {
-
         console.error(
           'Failed to save theme setting:',
           error

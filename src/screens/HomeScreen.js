@@ -90,26 +90,30 @@ const TRIAGE_CONFIG = {
 const QUICK_ACTIONS = [
   {
     id: 'symptoms',
-    label: 'Check\nSymptoms',
+    label: 'Check Symptoms',
+    description: 'AI-powered health triage',
     icon: 'shield-checkmark-outline',
     hasAI: true,
     route: 'SymptomChecker',
   },
   {
     id: 'doctor',
-    label: 'Find a\nDoctor',
+    label: 'Find a Doctor',
+    description: 'Find care near you',
     icon: 'search-outline',
     route: 'Doctors',
   },
   {
     id: 'records',
-    label: 'My\nRecords',
+    label: 'My Records',
+    description: 'View your health history',
     icon: 'folder-outline',
     route: 'AllRecords',
   },
   {
     id: 'meds',
     label: 'Medications',
+    description: 'Manage your medicines',
     icon: 'medical-outline',
     route: 'Medication',
   },
@@ -266,54 +270,116 @@ const relativeUpdatedTime = value => {
 ============================================================ */
 
 const ActionCard = memo(
-  ({ action, theme, width, onPress }) => (
-    <TouchableOpacity
-      activeOpacity={0.8}
-      onPress={() => onPress(action.route)}
-      style={[
-        styles.actionCard,
-        {
-          width,
-          backgroundColor: action.hasAI
-            ? theme.background === '#0A0F1A'
-              ? '#0F2930'
-              : '#E6FBFA'
-            : theme.card,
-          borderColor: action.hasAI
-            ? theme.cyanAccent
-            : theme.border,
-        },
-      ]}
-    >
-      <View style={styles.actionIconRow}>
-        <Ionicons
-          name={action.icon}
-          size={24}
-          color={theme.cyanAccent}
-        />
+  ({ action, theme, width, onPress }) => {
+    const isAI = action.hasAI === true;
 
-        {action.hasAI && (
-          <View
-            style={[
-              styles.aiBadge,
-              { backgroundColor: theme.cyanAccent },
-            ]}
-          >
-            <Text style={styles.aiBadgeText}>AI</Text>
-          </View>
-        )}
-      </View>
-
-      <Text
+    return (
+      <TouchableOpacity
+        activeOpacity={0.86}
+        onPress={() => onPress(action.route)}
+        accessibilityRole="button"
+        accessibilityLabel={action.label}
+        accessibilityHint={action.description}
         style={[
-          styles.actionText,
-          { color: theme.textPrimary },
+          styles.actionCard,
+          {
+            width,
+            backgroundColor: isAI
+              ? theme.background === '#0A0F1A'
+                ? '#0F2930'
+                : '#E6FBFA'
+              : theme.card,
+            borderColor: isAI
+              ? theme.cyanAccent
+              : theme.border,
+          },
         ]}
       >
-        {action.label}
-      </Text>
-    </TouchableOpacity>
-  ),
+        <View style={styles.actionTopRow}>
+          <View
+            style={[
+              styles.actionIconCircle,
+              {
+                backgroundColor: isAI
+                  ? theme.cyanAccent
+                  : theme.mutedBg,
+              },
+            ]}
+          >
+            <Ionicons
+              name={action.icon}
+              size={23}
+              color={
+                isAI
+                  ? '#0A0F1A'
+                  : theme.cyanAccent
+              }
+            />
+          </View>
+
+          <View style={styles.actionRightContent}>
+            {isAI ? (
+              <View
+                style={[
+                  styles.aiBadge,
+                  {
+                    backgroundColor:
+                      theme.cyanAccent,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="sparkles-outline"
+                  size={11}
+                  color="#0A0F1A"
+                />
+
+                <Text style={styles.aiBadgeText}>
+                  AI
+                </Text>
+              </View>
+            ) : null}
+
+            <Ionicons
+              name="chevron-forward"
+              size={18}
+              color={
+                isAI
+                  ? theme.cyanAccent
+                  : theme.textSecondary
+              }
+            />
+          </View>
+        </View>
+
+        <View style={styles.actionCopy}>
+          <Text
+            style={[
+              styles.actionText,
+              {
+                color: theme.textPrimary,
+              },
+            ]}
+            numberOfLines={1}
+          >
+            {action.label}
+          </Text>
+
+          <Text
+            style={[
+              styles.actionDescription,
+              {
+                color: theme.textSecondary,
+              },
+            ]}
+            numberOfLines={2}
+          >
+            {action.description}
+          </Text>
+        </View>
+      </TouchableOpacity>
+    );
+  },
 );
 
 /* ============================================================
@@ -421,6 +487,32 @@ export default function HomeScreen({ navigation }) {
         ?.trim()
         ?.charAt(0) || 'U'
     ).toUpperCase();
+
+  const [today, setToday] = useState(() => new Date());
+
+  useEffect(() => {
+    const updateToday = () => setToday(new Date());
+
+    updateToday();
+
+    const timer = setInterval(
+      updateToday,
+      60 * 1000,
+    );
+
+    return () => clearInterval(timer);
+  }, []);
+
+  const todayLabel = useMemo(
+    () =>
+      today.toLocaleDateString('en-IN', {
+        weekday: 'long',
+        day: 'numeric',
+        month: 'long',
+        year: 'numeric',
+      }),
+    [today],
+  );
 
   useEffect(() => {
     setAvatarImageFailed(false);
@@ -598,10 +690,13 @@ export default function HomeScreen({ navigation }) {
             lastDashboardFetchRef.current =
               Date.now();
           } catch (error) {
-            console.error(
-              'Dashboard Fetch Error:',
-              error,
-            );
+            if (__DEV__) {
+              console.warn(
+                'Dashboard Fetch Error:',
+                error?.message ||
+                  'Request failed.',
+              );
+            }
 
             setDashboardError(
               'Unable to refresh your health dashboard right now.',
@@ -765,6 +860,37 @@ export default function HomeScreen({ navigation }) {
             >
               Your CareSense health dashboard
             </Text>
+
+            <View
+              style={[
+                styles.todayDateRow,
+                {
+                  backgroundColor:
+                    theme.mutedBg,
+                  borderColor:
+                    theme.border,
+                },
+              ]}
+            >
+              <Ionicons
+                name="calendar-outline"
+                size={14}
+                color={theme.cyanAccent}
+              />
+
+              <Text
+                style={[
+                  styles.todayDateText,
+                  {
+                    color:
+                      theme.textSecondary,
+                  },
+                ]}
+                numberOfLines={1}
+              >
+                {todayLabel}
+              </Text>
+            </View>
           </View>
 
           <View
@@ -1206,24 +1332,16 @@ export default function HomeScreen({ navigation }) {
           Quick Actions
         </Text>
 
-        <View
-          style={styles.actionGrid}
-        >
-          {QUICK_ACTIONS.map(
-            action => (
-              <ActionCard
-                key={action.id}
-                action={action}
-                theme={theme}
-                width={
-                  actionCardWidth
-                }
-                onPress={
-                  openAction
-                }
-              />
-            ),
-          )}
+        <View style={styles.actionGrid}>
+          {QUICK_ACTIONS.map(action => (
+            <ActionCard
+              key={action.id}
+              action={action}
+              theme={theme}
+              width={actionCardWidth}
+              onPress={openAction}
+            />
+          ))}
         </View>
 
         {/* ================= HEALTH TIP ================= */}
@@ -2418,32 +2536,84 @@ const styles = StyleSheet.create({
     marginTop: 7,
   },
 
-  actionGrid: {
+  todayDateRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 20,
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    marginTop: 9,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 9,
+    borderWidth: 1,
+    maxWidth: '100%',
+  },
+
+  todayDateText: {
+    fontSize: 11,
+    fontWeight: '700',
+    flexShrink: 1,
+  },
+
+  actionGrid: {
+  flexDirection: 'row',
+  flexWrap: 'wrap',
+  gap: 12,
+  marginBottom: 24,
   },
 
   actionCard: {
-    borderRadius: 15,
+    minHeight: 142,
+    padding: 15,
+    borderRadius: 18,
     borderWidth: 1,
-    padding: 16,
-    minHeight: 104,
     justifyContent: 'space-between',
   },
 
-  actionIconRow: {
+  actionTopRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 15,
+    justifyContent: 'space-between',
+  },
+
+  actionIconCircle: {
+    width: 46,
+    height: 46,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  actionRightContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+
+  actionCopy: {
+    marginTop: 13,
+    paddingRight: 2,
+  },
+
+  actionText: {
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 19,
+  },
+
+  actionDescription: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
   },
 
   aiBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
     paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
+    paddingVertical: 5,
+    borderRadius: 8,
   },
 
   aiBadgeText: {
@@ -2453,9 +2623,15 @@ const styles = StyleSheet.create({
   },
 
   actionText: {
-    fontSize: 14,
-    fontWeight: '700',
-    lineHeight: 18,
+    fontSize: 15,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+
+  actionDescription: {
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
   },
 
   healthTipTitleRow: {

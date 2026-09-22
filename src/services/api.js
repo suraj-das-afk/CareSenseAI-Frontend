@@ -5,6 +5,8 @@ import * as Sharing from 'expo-sharing';
 import { auth } from '../config/firebase';
 import { getAppCheckToken } from '../config/appCheck';
 
+const API_TIMEOUT_MS = 20 * 1000;
+
 const API_URL = __DEV__
   ? (
       Platform.OS === 'android'
@@ -15,14 +17,46 @@ const API_URL = __DEV__
 
 const api = axios.create({
   baseURL: API_URL,
+  timeout: API_TIMEOUT_MS,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
 /* ============================================================
+   SAFE ERROR LOGGING
+============================================================ */
+
+const getSafeApiErrorMessage = error => {
+  if (
+    error?.code === 'ECONNABORTED' ||
+    error?.code === 'ETIMEDOUT'
+  ) {
+    return 'Request timed out.';
+  }
+
+  if (error?.response?.status) {
+    return `Request failed with status ${error.response.status}.`;
+  }
+
+  return (
+    error?.message ||
+    'Request failed.'
+  );
+};
+
+const logApiError = (label, error) => {
+  if (__DEV__) {
+    console.warn(
+      `${label}: ${getSafeApiErrorMessage(error)}`,
+    );
+  }
+};
+
+/* ============================================================
    HELPER
 ============================================================ */
+
 export const clearDashboardCache = () => {
   dashboardCache.clear();
   dashboardRequests.clear();
@@ -121,10 +155,7 @@ export const submitSymptoms = async (
 
     return response.data;
   } catch (error) {
-    console.error(
-      'API Error:',
-      error,
-    );
+    logApiError('API Error', error);
 
     throw error;
   }
@@ -246,10 +277,7 @@ export const getRecords = async (
 
           return response.data;
         } catch (error) {
-          console.error(
-            'Get Records Error:',
-            error,
-          );
+          logApiError('Get Records Error', error);
 
           /*
            * Never keep failed
@@ -275,10 +303,7 @@ export const getRecords = async (
 
     return request;
   } catch (error) {
-    console.error(
-      'Get Records Error:',
-      error,
-    );
+    logApiError('Get Records Error', error);
 
     throw error;
   }
@@ -305,7 +330,7 @@ export const getUserProfile = async () => {
     const response = await api.get('profile/');
     return response.data;
   } catch (error) {
-    console.error('Get User Profile Error:', error);
+    logApiError('Get User Profile Error', error);
     throw error;
   }
 };
@@ -331,7 +356,7 @@ export const updateUserProfile = async profileData => {
 
     return response.data;
   } catch (error) {
-    console.error('Update User Profile Error:', error);
+    logApiError('Update User Profile Error', error);
     throw error;
   }
 };
@@ -492,10 +517,7 @@ export const getDashboard = async (
 
       return response.data;
     } catch (error) {
-      console.error(
-        'Dashboard Error:',
-        error,
-      );
+      logApiError('Dashboard Error', error);
 
       /* Never keep failed data in cache. */
       dashboardCache.delete(cacheKey);
@@ -517,22 +539,56 @@ export const getDashboard = async (
 };
 
 /* ============================================================
-   DOCTORS
+   NEARBY HEALTHCARE
 ============================================================ */
 
-export const getDoctors = async (params = {}) => {
+export const getNearbyHealthcarePlaces = async (
+  params = {},
+) => {
   try {
-    const response = await api.get(
-      'doctors/',
-      { params },
-    );
+    const {
+      lat,
+      lng,
+      radius = 5000,
+    } = params;
+
+    if (
+      !Number.isFinite(Number(lat)) ||
+      !Number.isFinite(Number(lng))
+    ) {
+      throw new Error(
+        'A valid device location is required.',
+      );
+    }
+
+    const response =
+      await api.get(
+        'doctors/',
+        {
+          params: {
+            lat,
+            lng,
+            radius,
+          },
+        },
+      );
 
     return response.data;
   } catch (error) {
-    console.error('Get Doctors Error:', error);
+    logApiError(
+      'Nearby Healthcare Error',
+      error,
+    );
+
     throw error;
   }
 };
+
+/*
+ * Backward-compatible alias.
+ */
+export const getDoctors =
+  getNearbyHealthcarePlaces;
 
 /* ============================================================
    DELETE HEALTH RECORD
@@ -571,10 +627,7 @@ export const deleteRecord = async recordId => {
 
     return response.data;
   } catch (error) {
-    console.error(
-      'Delete Record Error:',
-      error,
-    );
+    logApiError('Delete Record Error', error);
 
     throw error;
   }

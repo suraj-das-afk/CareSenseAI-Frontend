@@ -10,12 +10,23 @@ import AppNavigator from './src/navigation/AppNavigator';
 SplashScreen.preventAutoHideAsync().catch(() => {});
 
 function AppContent() {
-  const [showAnimatedSplash, setShowAnimatedSplash] = useState(true);
-  useContext(AuthContext); // keep provider mounted and reactive
+  const [showAnimatedSplash, setShowAnimatedSplash] =
+    useState(true);
+
+  const {
+    loading,
+    user,
+    profile,
+  } = useContext(AuthContext);
+
+  const appReady =
+    !loading &&
+    (
+      !user ||
+      Boolean(profile)
+    );
 
   useEffect(() => {
-    // The native platform splash must hand off immediately so the
-    // React animation is visible instead of being hidden underneath it.
     SplashScreen.hideAsync().catch(() => {});
   }, []);
 
@@ -26,7 +37,10 @@ function AppContent() {
 
       {showAnimatedSplash && (
         <AnimatedSplashScreen
-          onFinish={() => setShowAnimatedSplash(false)}
+          ready={appReady}
+          onFinish={() =>
+            setShowAnimatedSplash(false)
+          }
         />
       )}
     </NavigationContainer>

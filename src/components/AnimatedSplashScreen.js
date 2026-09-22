@@ -97,7 +97,10 @@ function FloatingIcon({ name, left, top, delay, dark }) {
   );
 }
 
-export default function AnimatedSplashScreen({ onFinish }) {
+export default function AnimatedSplashScreen({
+  ready = false,
+  onFinish,
+}) {
   const dark = useColorScheme() === 'dark';
   const { width, height } = useWindowDimensions();
 
@@ -111,6 +114,9 @@ export default function AnimatedSplashScreen({ onFinish }) {
   const subtitleOpacity = useRef(new Animated.Value(0)).current;
   const progress = useRef(new Animated.Value(0)).current;
   const fadeOut = useRef(new Animated.Value(1)).current;
+  const splashStartedAt = useRef(Date.now()).current;
+  const finishTimerRef = useRef(null);
+  const finishStartedRef = useRef(false);
 
   useEffect(() => {
     const heartbeat = Animated.loop(
@@ -154,24 +160,66 @@ export default function AnimatedSplashScreen({ onFinish }) {
 
     heartbeat.start();
 
-    // IMPORTANT: never gate the animation on Firebase/network state.
-    // Auth can finish in the background and the app cannot get stuck here.
-    const timer = setTimeout(() => {
-      Animated.timing(fadeOut, {
-        toValue: 0,
-        duration: 500,
-        easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) onFinish?.();
-      });
-    }, 4200);
-
     return () => {
-      clearTimeout(timer);
       heartbeat.stop();
     };
   }, [fadeOut, logoOpacity, logoScale, onFinish, progress, pulse, ringOpacity, ringScale, subtitleOpacity, titleOpacity, titleY]);
+
+  useEffect(() => {
+  if (!ready || finishStartedRef.current) {
+    return;
+  }
+
+  const elapsed =
+    Date.now() - splashStartedAt;
+
+  const minimumDuration = 4200;
+
+  const remaining =
+    Math.max(
+      0,
+      minimumDuration - elapsed,
+    );
+
+  finishTimerRef.current =
+    setTimeout(() => {
+      if (finishStartedRef.current) {
+        return;
+      }
+
+      finishStartedRef.current = true;
+
+      Animated.timing(
+        fadeOut,
+        {
+          toValue: 0,
+          duration: 500,
+          easing: Easing.inOut(
+            Easing.cubic,
+          ),
+          useNativeDriver: true,
+        },
+      ).start(({ finished }) => {
+        if (finished) {
+          onFinish?.();
+        }
+      });
+    }, remaining);
+
+  return () => {
+    if (finishTimerRef.current) {
+      clearTimeout(
+        finishTimerRef.current,
+      );
+      finishTimerRef.current = null;
+    }
+  };
+}, [
+  ready,
+  fadeOut,
+  onFinish,
+  splashStartedAt,
+]);
 
   const trackWidth = Math.min(230, Math.max(175, width * 0.52));
 

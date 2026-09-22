@@ -98,6 +98,10 @@ android {
         buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
         buildConfigField "String", "CARESENSE_APP_CHECK_PROVIDER", "\"${System.getenv('EXPO_PUBLIC_FIREBASE_APP_CHECK_PROVIDER') ?: ''}\""
         buildConfigField "String", "CARESENSE_RECAPTCHA_ENTERPRISE_SITE_KEY", "\"${System.getenv('EXPO_PUBLIC_RECAPTCHA_ENTERPRISE_SITE_KEY') ?: ''}\""
+        manifestPlaceholders = [
+            CARESENSE_GOOGLE_MAPS_ANDROID_API_KEY:
+                System.getenv('CARESENSE_GOOGLE_MAPS_ANDROID_API_KEY') ?: ''
+        ]
     }
     signingConfigs {
         debug {
