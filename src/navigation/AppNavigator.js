@@ -1,10 +1,14 @@
-import React, { useContext } from 'react';
+import React, { useContext, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ActivityIndicator,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar,
 } from 'react-native';
 import {
   createStackNavigator,
@@ -28,6 +32,17 @@ import AllRecordsScreen from '../screens/AllRecordsScreen';
 import DoctorsScreen from '../screens/DoctorsScreen';
 import BookAppointmentScreen from '../screens/BookAppointmentScreen';
 import MedicationScreen from '../screens/MedicationScreen';
+import ProfileAccountScreen from '../screens/ProfileAccountScreen';
+import HealthInformationScreen from '../screens/HealthInformationScreen';
+import AppSettingsScreen from '../screens/AppSettingsScreen';
+import NotificationsScreen from '../screens/NotificationsScreen';
+import NotificationCenterScreen from '../screens/NotificationCenterScreen';
+import PrivacySecurityScreen from '../screens/PrivacySecurityScreen';
+import EmergencyContactScreen from '../screens/EmergencyContactScreen';
+import ConnectedDevicesScreen from '../screens/ConnectedDevicesScreen';
+import HelpSupportScreen from '../screens/HelpSupportScreen';
+import ContactSupportScreen from '../screens/ContactSupportScreen';
+import AboutScreen from '../screens/AboutScreen';
 
 const Stack = createStackNavigator();
 
@@ -37,11 +52,19 @@ export default function AppNavigator() {
     loading,
     profile,
     profileLoading,
+    profileError,
     onboardingCompleted,
     isDarkMode,
     isAppLocked,
+    isBiometricsEnabled,
+    passwordLockEnabled,
     authenticateBiometricsManually,
+    verifyPasswordLock,
+    refreshProfile,
   } = useContext(AuthContext);
+
+  const [unlockPin, setUnlockPin] = useState('');
+  const [unlockError, setUnlockError] = useState('');
 
   const headerBackground = isDarkMode
     ? '#0A0F1A'
@@ -54,6 +77,10 @@ export default function AppNavigator() {
   const screenBackground = isDarkMode
     ? '#0A0F1A'
     : '#F8F9FB';
+
+  const statusBarStyle = isDarkMode
+  ? 'light-content'
+  : 'dark-content';
 
   /*
    * Wait for Firebase authentication to restore.
@@ -82,50 +109,44 @@ export default function AppNavigator() {
    */
   if (
     user &&
+    profileLoading &&
     !profile
   ) {
     return (
       <View
         style={[
-          styles.center,
-          {
-            backgroundColor: screenBackground,
-          },
-        ]}
-      />
-    );
-  }
-
-  /*
-   * BIOMETRIC LOCK SCREEN INTERCEPTOR
-   */
-  if (
-    user &&
-    isAppLocked
-  ) {
-    return (
-      <View
-        style={[
-          styles.lockContainer,
+          styles.startupGate,
           {
             backgroundColor:
-              isDarkMode
-                ? '#0A0F1A'
-                : '#F8F9FB',
+              screenBackground,
           },
         ]}
       >
-        <View style={styles.iconCircle}>
+        <View
+          style={[
+            styles.startupIcon,
+            {
+              backgroundColor:
+                isDarkMode
+                  ? '#141C29'
+                  : '#FFFFFF',
+              borderColor:
+                isDarkMode
+                  ? '#222E40'
+                  : '#E2E8F0',
+            },
+          ]}
+        >
           <Ionicons
-            name="lock-closed"
-            size={48}
+            name="heart-outline"
+            size={30}
             color="#00D4C5"
           />
         </View>
 
         <Text
           style={[
-            styles.lockTitle,
+            styles.startupTitle,
             {
               color:
                 isDarkMode
@@ -134,12 +155,12 @@ export default function AppNavigator() {
             },
           ]}
         >
-          CareSense AI Protected
+          Restoring CareSense
         </Text>
 
         <Text
           style={[
-            styles.lockSub,
+            styles.startupMessage,
             {
               color:
                 isDarkMode
@@ -148,35 +169,295 @@ export default function AppNavigator() {
             },
           ]}
         >
-          Biometric verification required to access your medical records.
+          Preparing your health dashboard...
+        </Text>
+
+        <ActivityIndicator
+          size="small"
+          color="#00D4C5"
+          style={{
+            marginTop: 20,
+          }}
+        />
+      </View>
+    );
+  }
+
+  if (
+    user &&
+    !profile &&
+    !profileLoading &&
+    profileError
+  ) {
+    return (
+      <View
+        style={[
+          styles.startupGate,
+          {
+            backgroundColor:
+              screenBackground,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.startupIcon,
+            {
+              backgroundColor:
+                isDarkMode
+                  ? '#141C29'
+                  : '#FFFFFF',
+              borderColor:
+                isDarkMode
+                  ? '#222E40'
+                  : '#E2E8F0',
+            },
+          ]}
+        >
+          <Ionicons
+            name="cloud-offline-outline"
+            size={30}
+            color="#00D4C5"
+          />
+        </View>
+
+        <Text
+          style={[
+            styles.startupTitle,
+            {
+              color:
+                isDarkMode
+                  ? '#FFFFFF'
+                  : '#111827',
+            },
+          ]}
+        >
+          You're offline
+        </Text>
+
+        <Text
+          style={[
+            styles.startupMessage,
+            {
+              color:
+                isDarkMode
+                  ? '#8897AE'
+                  : '#64748B',
+            },
+          ]}
+        >
+          We can't verify your CareSense profile yet.
+          Connect to the internet and try again.
         </Text>
 
         <TouchableOpacity
-          style={styles.unlockBtn}
-          onPress={
-            authenticateBiometricsManually
+          style={styles.retryButton}
+          onPress={() =>
+            void refreshProfile()
           }
+          activeOpacity={0.8}
         >
           <Ionicons
-            name="finger-print-outline"
-            size={22}
+            name="refresh-outline"
+            size={18}
             color="#0A0F1A"
-            style={{
-              marginRight: 8,
-            }}
           />
 
-          <Text style={styles.unlockBtnText}>
-            Unlock with Biometrics
+          <Text
+            style={styles.retryButtonText}
+          >
+            Try Again
           </Text>
         </TouchableOpacity>
       </View>
     );
   }
 
+  /*
+   * APP LOCK SCREEN INTERCEPTOR
+   */
+  if (
+    user &&
+    isAppLocked
+  ) {
+    const handlePasswordUnlock = async () => {
+      setUnlockError('');
+
+      if (!unlockPin) {
+        setUnlockError('Enter your app PIN.');
+        return;
+      }
+
+      const result = await verifyPasswordLock?.(unlockPin);
+
+      if (result?.success) {
+        setUnlockPin('');
+        setUnlockError('');
+        return;
+      }
+
+      setUnlockError(
+        result?.message ||
+          'The PIN is incorrect.'
+      );
+    };
+
+    return (
+      <KeyboardAvoidingView
+        style={styles.lockKeyboard}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View
+          style={[
+            styles.lockContainer,
+            {
+              backgroundColor:
+                isDarkMode
+                  ? '#0A0F1A'
+                  : '#F8F9FB',
+            },
+          ]}
+        >
+          <View style={styles.iconCircle}>
+            <Ionicons
+              name="lock-closed"
+              size={48}
+              color="#00D4C5"
+            />
+          </View>
+
+          <Text
+            style={[
+              styles.lockTitle,
+              {
+                color:
+                  isDarkMode
+                    ? '#FFFFFF'
+                    : '#111827',
+              },
+            ]}
+          >
+            CareSense AI Protected
+          </Text>
+
+          <Text
+            style={[
+              styles.lockSub,
+              {
+                color:
+                  isDarkMode
+                    ? '#8897AE'
+                    : '#64748B',
+              },
+            ]}
+          >
+            Unlock the app to access your CareSense health information.
+          </Text>
+
+          {isBiometricsEnabled ? (
+            <TouchableOpacity
+              style={styles.unlockBtn}
+              onPress={async () => {
+                setUnlockError('');
+                await authenticateBiometricsManually?.();
+              }}
+              activeOpacity={0.82}
+            >
+              <Ionicons
+                name="scan-outline"
+                size={22}
+                color="#0A0F1A"
+                style={{ marginRight: 8 }}
+              />
+              <Text style={styles.unlockBtnText}>
+                Unlock with Face / Biometrics
+              </Text>
+            </TouchableOpacity>
+          ) : null}
+
+          {isBiometricsEnabled && passwordLockEnabled ? (
+            <Text style={styles.lockOrText}>OR</Text>
+          ) : null}
+
+          {passwordLockEnabled ? (
+            <View style={styles.passwordUnlockBox}>
+              <TextInput
+                value={unlockPin}
+                onChangeText={value => {
+                  setUnlockError('');
+                  setUnlockPin(
+                    value
+                      .replace(/\D/g, '')
+                      .slice(0, 6)
+                  );
+                }}
+                secureTextEntry
+                keyboardType="number-pad"
+                maxLength={6}
+                placeholder="Enter app PIN"
+                placeholderTextColor={
+                  isDarkMode
+                    ? '#8897AE'
+                    : '#64748B'
+                }
+                style={[
+                  styles.lockPinInput,
+                  {
+                    backgroundColor:
+                      isDarkMode
+                        ? '#141C29'
+                        : '#FFFFFF',
+                    borderColor:
+                      isDarkMode
+                        ? '#222E40'
+                        : '#E2E8F0',
+                    color:
+                      isDarkMode
+                        ? '#FFFFFF'
+                        : '#111827',
+                  },
+                ]}
+              />
+
+              <TouchableOpacity
+                style={styles.pinUnlockBtn}
+                onPress={() => {
+                  void handlePasswordUnlock();
+                }}
+                activeOpacity={0.82}
+              >
+                <Ionicons
+                  name="keypad-outline"
+                  size={20}
+                  color="#0A0F1A"
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={styles.unlockBtnText}>
+                  Unlock with PIN
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+
+          {unlockError ? (
+            <Text style={styles.lockErrorText}>
+              {unlockError}
+            </Text>
+          ) : null}
+        </View>
+      </KeyboardAvoidingView>
+    );
+  }
+
   return (
-    <Stack.Navigator
-      screenOptions={{
+    <>
+      <StatusBar
+        barStyle={statusBarStyle}
+        backgroundColor="transparent"
+        translucent
+      />
+      <Stack.Navigator
+        screenOptions={{
         headerStyle: {
           backgroundColor:
             headerBackground,
@@ -241,31 +522,25 @@ export default function AppNavigator() {
 
           <Stack.Screen
             name="SymptomChecker"
-            component={
-              SymptomCheckerScreen
-            }
+            component={SymptomCheckerScreen}
             options={{
-              title: 'Check Symptoms',
+              headerShown: false,
             }}
           />
 
           <Stack.Screen
             name="HealthRecordDetail"
-            component={
-              HealthRecordDetail
-            }
+            component={HealthRecordDetail}
             options={{
-              title: 'Analysis Result',
+              headerShown: false,
             }}
           />
 
           <Stack.Screen
             name="AllRecords"
-            component={
-              AllRecordsScreen
-            }
+            component={AllRecordsScreen}
             options={{
-              title: 'My Records',
+              headerShown: false,
             }}
           />
 
@@ -289,20 +564,121 @@ export default function AppNavigator() {
 
           <Stack.Screen
             name="Medication"
-            component={
-              MedicationScreen
-            }
+            component={MedicationScreen}
             options={{
-              title: 'My Medications',
+              headerShown: false,
+            }}
+          />
+
+          <Stack.Screen
+            name="ProfileAccount"
+            component={ProfileAccountScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="HealthInformation"
+            component={HealthInformationScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="AppSettings"
+            component={AppSettingsScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="Notifications"
+            component={NotificationsScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="NotificationCenter"
+            component={NotificationCenterScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="PrivacySecurity"
+            component={PrivacySecurityScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="EmergencyContact"
+            component={EmergencyContactScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="ConnectedDevices"
+            component={ConnectedDevicesScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="HelpSupport"
+            component={HelpSupportScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="ContactSupport"
+            component={ContactSupportScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
+            }}
+          />
+
+          <Stack.Screen
+            name="About"
+            component={AboutScreen}
+            options={{
+              headerShown: false,
+              gestureEnabled: true,
             }}
           />
         </>
       )}
-    </Stack.Navigator>
+      </Stack.Navigator>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  lockKeyboard: {
+    flex: 1,
+  },
   center: {
     flex: 1,
     justifyContent: 'center',
@@ -352,9 +728,97 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
 
+  lockOrText: {
+    marginTop: 16,
+    marginBottom: 12,
+    color: '#8897AE',
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+  },
+  passwordUnlockBox: {
+    width: '100%',
+    maxWidth: 360,
+    alignItems: 'stretch',
+  },
+  lockPinInput: {
+    width: '100%',
+    minHeight: 54,
+    borderWidth: 1,
+    borderRadius: 15,
+    paddingHorizontal: 14,
+    textAlign: 'center',
+    fontSize: 20,
+    letterSpacing: 5,
+  },
+  pinUnlockBtn: {
+    marginTop: 10,
+    minHeight: 52,
+    paddingHorizontal: 18,
+    borderRadius: 15,
+    backgroundColor: '#00D4C5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  lockErrorText: {
+    marginTop: 12,
+    color: '#EF4444',
+    fontSize: 12.5,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
   unlockBtnText: {
     color: '#0A0F1A',
     fontSize: 15,
     fontWeight: '700',
+  },
+  startupGate: {
+  flex: 1,
+  alignItems: 'center',
+  justifyContent: 'center',
+  paddingHorizontal: 32,
+  },
+
+  startupIcon: {
+    width: 76,
+    height: 76,
+    borderRadius: 24,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+  },
+
+  startupTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+
+  startupMessage: {
+    fontSize: 14,
+    lineHeight: 21,
+    textAlign: 'center',
+    marginTop: 8,
+    maxWidth: 340,
+  },
+
+  retryButton: {
+    marginTop: 24,
+    minHeight: 48,
+    paddingHorizontal: 22,
+    borderRadius: 15,
+    backgroundColor: '#00D4C5',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+
+  retryButtonText: {
+    color: '#0A0F1A',
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

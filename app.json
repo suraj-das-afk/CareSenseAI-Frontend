@@ -18,15 +18,10 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-
       "googleServicesFile": "./google-services.json",
-
       "softwareKeyboardLayoutMode": "resize",
-
       "edgeToEdgeEnabled": true,
-
       "predictiveBackGestureEnabled": false,
-
       "package": "com.caresenseai.app"
     },
     "web": {
@@ -37,7 +32,7 @@
       "@react-native-firebase/app",
       "@react-native-firebase/app-check",
       "expo-location",
-
+      "react-native-ble-manager",
       [
         "expo-splash-screen",
         {
@@ -50,7 +45,6 @@
           }
         }
       ],
-
       [
         "expo-notifications",
         {
@@ -58,8 +52,8 @@
           "defaultChannel": "caresense"
         }
       ],
-
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      "expo-secure-store"
     ],
     "experiments": {
       "typedRoutes": true,

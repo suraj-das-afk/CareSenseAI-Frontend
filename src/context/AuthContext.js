@@ -19,6 +19,7 @@ import {
   signOut as firebaseSignOut,
   onAuthStateChanged,
   updateProfile,
+  sendEmailVerification,
 } from 'firebase/auth';
 
 import {
@@ -41,6 +42,73 @@ import {
 ============================================================ */
 
 const STORAGE_KEY = '@caresense_user_settings_v2';
+
+const PROFILE_ROUTING_CACHE_PREFIX =
+  '@caresense_profile_routing_v1:';
+
+const getProfileRoutingCacheKey = uid =>
+  `${PROFILE_ROUTING_CACHE_PREFIX}${uid}`;
+
+const readProfileRoutingCache = async uid => {
+  if (!uid) {
+    return null;
+  }
+
+  try {
+    const raw =
+      await AsyncStorage.getItem(
+        getProfileRoutingCacheKey(uid)
+      );
+
+    if (!raw) {
+      return null;
+    }
+
+    const parsed = JSON.parse(raw);
+
+    if (
+      !parsed ||
+      typeof parsed !== 'object'
+    ) {
+      return null;
+    }
+
+    return {
+      onboarding_completed:
+        parsed.onboarding_completed === true,
+    };
+  } catch (error) {
+    console.warn(
+      'Unable to read profile routing cache:',
+      error
+    );
+
+    return null;
+  }
+};
+
+const writeProfileRoutingCache =
+  async (uid, profileData) => {
+    if (!uid || !profileData) {
+      return;
+    }
+
+    try {
+      await AsyncStorage.setItem(
+        getProfileRoutingCacheKey(uid),
+        JSON.stringify({
+          onboarding_completed:
+            profileData.onboarding_completed === true,
+          cachedAt: Date.now(),
+        })
+      );
+    } catch (error) {
+      console.warn(
+        'Unable to cache profile routing state:',
+        error
+      );
+    }
+  };
 
 
 /* ============================================================
@@ -72,16 +140,10 @@ export const AuthProvider = ({ children }) => {
 
   const systemColorScheme = useColorScheme();
 
-  // Device appearance is the source of truth for the default theme.
-  // Existing saved legacy `darkTheme` values are intentionally ignored.
-  const [themeMode, setThemeMode] = useState('system');
-
+  // Device appearance is the single source of truth for CareSense theme.
+  // There is intentionally no app-level light/dark override.
   const isDarkMode =
-    themeMode === 'dark'
-      ? true
-      : themeMode === 'light'
-        ? false
-        : systemColorScheme === 'dark';
+    systemColorScheme === 'dark';
 
 
   /* ==========================================================
@@ -111,6 +173,9 @@ export const AuthProvider = ({ children }) => {
   const [isBiometricsEnabled, setIsBiometricsEnabled] =
     useState(false);
 
+  const [passwordLockEnabled, setPasswordLockEnabled] =
+    useState(false);
+
   const [isAppLocked, setIsAppLocked] =
     useState(false);
 
@@ -137,6 +202,14 @@ export const AuthProvider = ({ children }) => {
    * for the flow to decide whether the account is allowed.
    */
   const googleAuthFlowRef = useRef(null);
+
+  /*
+   * Email/password flows temporarily suppress the global
+   * unverified-session guard while Firebase finishes the
+   * interactive sign-in or signup operation.
+   */
+  const emailLoginFlowRef = useRef(false);
+  const emailSignupFlowRef = useRef(false);
 
 
   /* ==========================================================
@@ -171,16 +244,16 @@ export const AuthProvider = ({ children }) => {
 
         if (
           parsed &&
-          ['system', 'light', 'dark'].includes(parsed.themeMode)
+          typeof parsed.biometrics === 'boolean'
         ) {
-          setThemeMode(parsed.themeMode);
+          setIsBiometricsEnabled(parsed.biometrics);
         }
 
         if (
           parsed &&
-          typeof parsed.biometrics === 'boolean'
+          typeof parsed.passwordLock === 'boolean'
         ) {
-          setIsBiometricsEnabled(parsed.biometrics);
+          setPasswordLockEnabled(parsed.passwordLock);
         }
 
       } catch (error) {
@@ -267,11 +340,9 @@ export const AuthProvider = ({ children }) => {
   ========================================================== */
 
   const refreshProfile = useCallback(async () => {
-
     const currentUser = auth.currentUser;
 
     if (!currentUser) {
-
       if (mountedRef.current) {
         setProfile(null);
         setProfileError(null);
@@ -286,8 +357,33 @@ export const AuthProvider = ({ children }) => {
       setProfileError(null);
     }
 
-    try {
+    /*
+    * Load only the cached routing state first.
+    *
+    * This allows an already-known user to reach the correct
+    * part of the application even when the backend is offline.
+    */
+    const cachedRouting =
+      await readProfileRoutingCache(
+        currentUser.uid
+      );
 
+    if (
+      cachedRouting &&
+      mountedRef.current
+    ) {
+      const cachedProfile =
+        buildFirebaseFallbackProfile(
+          currentUser
+        );
+
+      cachedProfile.onboarding_completed =
+        cachedRouting.onboarding_completed;
+
+      setProfile(cachedProfile);
+    }
+
+    try {
       const backendProfile =
         await getUserProfile();
 
@@ -295,22 +391,15 @@ export const AuthProvider = ({ children }) => {
         return backendProfile;
       }
 
-      /*
-       * Backend profile is the source of truth.
-       * Firebase values are only used as safe fallbacks
-       * for fields that haven't been stored yet.
-       */
       const fallbackProfile =
-        buildFirebaseFallbackProfile(currentUser);
+        buildFirebaseFallbackProfile(
+          currentUser
+        );
 
       const mergedProfile = {
         ...fallbackProfile,
         ...backendProfile,
 
-        /*
-         * Keep Firebase photo if the backend doesn't
-         * have a custom photo yet.
-         */
         profile_photo_url:
           backendProfile?.profile_photo_url ||
           currentUser.photoURL ||
@@ -324,43 +413,87 @@ export const AuthProvider = ({ children }) => {
 
       setProfile(mergedProfile);
 
+      /*
+      * Store only the routing state locally.
+      */
+      await writeProfileRoutingCache(
+        currentUser.uid,
+        mergedProfile
+      );
+
       return mergedProfile;
 
     } catch (error) {
-
-      console.error(
-        'Failed to load CareSense profile:',
-        error
-      );
+      const status =
+        error?.response?.status;
 
       /*
-       * Don't destroy the user's session simply because
-       * Render is waking up or the backend is temporarily
-       * unavailable.
-       */
-      const fallbackProfile =
-        buildFirebaseFallbackProfile(currentUser);
+      * 404 means the authenticated Firebase user
+      * does not have a CareSense backend profile yet.
+      *
+      * This is a real onboarding case and should NOT
+      * be treated as an offline failure.
+      */
+      if (status === 404) {
+        const newProfile =
+          buildFirebaseFallbackProfile(
+            currentUser
+          );
 
+        if (mountedRef.current) {
+          setProfile(newProfile);
+          setProfileError(null);
+        }
+
+        return newProfile;
+      }
+
+      /*
+      * Network / backend outage:
+      *
+      * Keep the cached onboarding state when we have it.
+      */
+      if (cachedRouting) {
+        const offlineProfile =
+          buildFirebaseFallbackProfile(
+            currentUser
+          );
+
+        offlineProfile.onboarding_completed =
+          cachedRouting.onboarding_completed;
+
+        if (mountedRef.current) {
+          setProfile(offlineProfile);
+
+          setProfileError(
+            'CareSense is offline. Showing your last known app state.'
+          );
+        }
+
+        return offlineProfile;
+      }
+
+      /*
+      * No cached state means we genuinely cannot know
+      * whether this account has completed onboarding.
+      *
+      * Do NOT send the user to onboarding here.
+      */
       if (mountedRef.current) {
-
-        setProfile(fallbackProfile);
+        setProfile(null);
 
         setProfileError(
-          error?.response?.data ||
-          error?.message ||
-          'Unable to load profile from the server.'
+          'Unable to connect to CareSense. Please connect to the internet and try again.'
         );
       }
 
-      return fallbackProfile;
+      return null;
 
     } finally {
-
       if (mountedRef.current) {
         setProfileLoading(false);
       }
     }
-
   }, [buildFirebaseFallbackProfile]);
 
 
@@ -406,6 +539,11 @@ export const AuthProvider = ({ children }) => {
           ...(profile || {}),
           ...(updatedProfile || {}),
         };
+
+        await writeProfileRoutingCache(
+          currentUser.uid,
+          nextProfile
+        );
 
         if (mountedRef.current) {
           setProfile(nextProfile);
@@ -480,6 +618,11 @@ export const AuthProvider = ({ children }) => {
         const biometricsActive =
           parsed?.biometrics === true;
 
+        const passwordActive =
+          parsed?.passwordLock === true &&
+          typeof parsed?.appPasscode === 'string' &&
+          parsed.appPasscode.length >= 4;
+
         /*
          * Keep state synchronized with storage.
          */
@@ -487,11 +630,23 @@ export const AuthProvider = ({ children }) => {
           setIsBiometricsEnabled(
             biometricsActive
           );
+
+          setPasswordLockEnabled(
+            passwordActive
+          );
         }
 
-        if (!biometricsActive) {
+        if (!biometricsActive && !passwordActive) {
           if (mountedRef.current) {
             setIsAppLocked(false);
+          }
+
+          return;
+        }
+
+        if (!biometricsActive && passwordActive) {
+          if (mountedRef.current) {
+            setIsAppLocked(true);
           }
 
           return;
@@ -600,6 +755,56 @@ export const AuthProvider = ({ children }) => {
             }
 
             setLoading(false);
+
+            return;
+          }
+
+          /*
+           * Email/password accounts must own the email address
+           * before CareSense allows the authenticated session to
+           * continue into the app. Google accounts are already
+           * verified by their federated identity provider.
+           */
+          const isGoogleAccount =
+            Array.isArray(currentUser.providerData) &&
+            currentUser.providerData.some(
+              provider =>
+                provider?.providerId === 'google.com'
+            );
+
+          if (
+            currentUser.email &&
+            currentUser.emailVerified !== true &&
+            !isGoogleAccount
+          ) {
+            if (
+              emailLoginFlowRef.current ||
+              emailSignupFlowRef.current
+            ) {
+              return;
+            }
+            try {
+              await firebaseSignOut(auth);
+            } catch (signOutError) {
+              console.warn(
+                'Unable to clear an unverified Firebase session:',
+                signOutError
+              );
+            }
+
+            clearRecordsCache();
+            clearDashboardCache();
+
+            biometricCheckedForUser.current = null;
+
+            if (mountedRef.current) {
+              setUser(null);
+              setProfile(null);
+              setProfileError(null);
+              setProfileLoading(false);
+              setIsAppLocked(false);
+              setLoading(false);
+            }
 
             return;
           }
@@ -761,6 +966,13 @@ export const AuthProvider = ({ children }) => {
               ? JSON.parse(existing)
               : {};
 
+          const passwordActive =
+            parsed?.passwordLock === true &&
+            typeof parsed?.appPasscode === 'string' &&
+            parsed.appPasscode.length >= 4;
+
+          setPasswordLockEnabled(passwordActive);
+
           await AsyncStorage.setItem(
             STORAGE_KEY,
             JSON.stringify({
@@ -768,6 +980,8 @@ export const AuthProvider = ({ children }) => {
               biometrics: false,
             })
           );
+
+          setIsAppLocked(passwordActive);
 
           return {
             success: true,
@@ -897,27 +1111,23 @@ export const AuthProvider = ({ children }) => {
 
 
   /* ==========================================================
-     GLOBAL THEME
+     PASSWORD / PIN LOCK
   ========================================================== */
 
-  const toggleGlobalTheme =
-    useCallback(async value => {
-      const nextThemeMode =
-        typeof value === 'boolean'
-          ? value
-            ? 'dark'
-            : 'light'
-          : ['system', 'light', 'dark'].includes(value)
-            ? value
-            : 'system';
+  const enablePasswordLock =
+    useCallback(async passcode => {
+      const normalized = String(passcode || '').trim();
 
-      setThemeMode(nextThemeMode);
+      if (normalized.length < 4) {
+        return {
+          success: false,
+          message: 'Use at least 4 digits for the app PIN.',
+        };
+      }
 
       try {
         const existing =
-          await AsyncStorage.getItem(
-            STORAGE_KEY
-          );
+          await AsyncStorage.getItem(STORAGE_KEY);
 
         const parsed =
           existing
@@ -928,17 +1138,122 @@ export const AuthProvider = ({ children }) => {
           STORAGE_KEY,
           JSON.stringify({
             ...parsed,
-            themeMode: nextThemeMode,
+            passwordLock: true,
+            appPasscode: normalized,
           })
         );
 
+        setPasswordLockEnabled(true);
+        setIsAppLocked(false);
+
+        return {
+          success: true,
+        };
       } catch (error) {
         console.error(
-          'Failed to save theme setting:',
+          'Failed to enable password lock:',
           error
         );
-      }
 
+        return {
+          success: false,
+          message: 'Unable to enable password lock right now.',
+        };
+      }
+    }, []);
+
+  const disablePasswordLock =
+    useCallback(async passcode => {
+      try {
+        const existing =
+          await AsyncStorage.getItem(STORAGE_KEY);
+
+        const parsed =
+          existing
+            ? JSON.parse(existing)
+            : {};
+
+        if (
+          parsed?.passwordLock !== true ||
+          String(passcode || '') !==
+            String(parsed?.appPasscode || '')
+        ) {
+          return {
+            success: false,
+            message: 'The current app PIN is incorrect.',
+          };
+        }
+
+        const next = {
+          ...parsed,
+          passwordLock: false,
+        };
+
+        delete next.appPasscode;
+
+        await AsyncStorage.setItem(
+          STORAGE_KEY,
+          JSON.stringify(next)
+        );
+
+        setPasswordLockEnabled(false);
+
+        return {
+          success: true,
+        };
+      } catch (error) {
+        console.error(
+          'Failed to disable password lock:',
+          error
+        );
+
+        return {
+          success: false,
+          message: 'Unable to disable password lock right now.',
+        };
+      }
+    }, []);
+
+  const verifyPasswordLock =
+    useCallback(async passcode => {
+      try {
+        const existing =
+          await AsyncStorage.getItem(STORAGE_KEY);
+
+        const parsed =
+          existing
+            ? JSON.parse(existing)
+            : {};
+
+        if (
+          parsed?.passwordLock !== true ||
+          String(passcode || '') !==
+            String(parsed?.appPasscode || '')
+        ) {
+          return {
+            success: false,
+            message: 'The PIN is incorrect.',
+          };
+        }
+
+        if (mountedRef.current) {
+          setIsAppLocked(false);
+        }
+
+        return {
+          success: true,
+        };
+      } catch (error) {
+        console.error(
+          'Password lock verification error:',
+          error
+        );
+
+        return {
+          success: false,
+          message: 'Unable to verify the app PIN right now.',
+        };
+      }
     }, []);
 
 
@@ -1209,13 +1524,56 @@ export const AuthProvider = ({ children }) => {
         );
       }
 
+      emailLoginFlowRef.current = true;
+
       try {
 
-        await signInWithEmailAndPassword(
-          auth,
-          email.trim(),
-          password
-        );
+        const userCredential =
+          await signInWithEmailAndPassword(
+            auth,
+            email.trim(),
+            password
+          );
+
+        const firebaseUser =
+          userCredential.user;
+
+        if (
+          firebaseUser &&
+          firebaseUser.email &&
+          firebaseUser.emailVerified !== true
+        ) {
+          let verificationEmailSent = false;
+
+          try {
+            await sendEmailVerification(
+              firebaseUser
+            );
+            verificationEmailSent = true;
+          } catch (verificationError) {
+            console.warn(
+              'Unable to resend verification email during login:',
+              verificationError
+            );
+          }
+
+          await firebaseSignOut(auth);
+
+          const error =
+            new Error(
+              verificationEmailSent
+                ? 'Please verify your email address before signing in.'
+                : 'Your email address is not verified yet. Please verify it before signing in.'
+            );
+
+          error.code =
+            'auth/email-not-verified';
+
+          error.verificationEmailSent =
+            verificationEmailSent;
+
+          throw error;
+        }
 
         return true;
 
@@ -1227,6 +1585,8 @@ export const AuthProvider = ({ children }) => {
         );
 
         throw error;
+      } finally {
+        emailLoginFlowRef.current = false;
       }
 
     },
@@ -1259,6 +1619,8 @@ export const AuthProvider = ({ children }) => {
         );
       }
 
+      emailSignupFlowRef.current = true;
+
       try {
 
         const userCredential =
@@ -1285,67 +1647,52 @@ export const AuthProvider = ({ children }) => {
             }
           );
 
-
           /*
-           * Immediately expose the new Firebase
-           * identity locally.
+           * Require ownership of the email address before
+           * the account can enter the CareSense application.
            */
-          const nextUser = {
-            uid:
-              firebaseUser.uid,
-
-            email:
-              firebaseUser.email || email.trim(),
-
-            name:
-              name.trim(),
-
-            displayName:
-              name.trim(),
-
-            photoURL:
-              firebaseUser.photoURL || null,
-
-            emailVerified:
-              firebaseUser.emailVerified === true,
-          };
-
-
-          if (mountedRef.current) {
-            setUser(nextUser);
-          }
-
-
-          /*
-           * Create/load backend profile immediately.
-           *
-           * The backend GET endpoint automatically creates
-           * a profile for authenticated users that don't have
-           * one yet.
-           */
-          const createdProfile =
-            await refreshProfile();
-
-
-          /*
-           * Safety fallback if the backend is temporarily
-           * unavailable.
-           */
-          if (
-            !createdProfile &&
-            mountedRef.current
-          ) {
-
-            setProfile(
-              buildFirebaseFallbackProfile(
-                firebaseUser
-              )
+          try {
+            await sendEmailVerification(
+              firebaseUser
             );
+          } catch (verificationError) {
+            try {
+              await firebaseSignOut(auth);
+            } catch (signOutError) {
+              console.warn(
+                'Unable to sign out after verification email failure:',
+                signOutError
+              );
+            }
+
+            const error =
+              new Error(
+                'We could not send the verification email. Please try again.'
+              );
+
+            error.code =
+              'auth/verification-email-failed';
+
+            error.cause =
+              verificationError;
+
+            throw error;
           }
+
+          /*
+           * Do not create a backend health profile until the
+           * email has been verified and the user successfully
+           * signs in.
+           */
+          await firebaseSignOut(auth);
+
+          return {
+            requiresEmailVerification: true,
+            email:
+              firebaseUser.email ||
+              email.trim(),
+          };
         }
-
-
-        return true;
 
       } catch (error) {
 
@@ -1355,13 +1702,12 @@ export const AuthProvider = ({ children }) => {
         );
 
         throw error;
+      } finally {
+        emailSignupFlowRef.current = false;
       }
 
     },
-    [
-      refreshProfile,
-      buildFirebaseFallbackProfile,
-    ]
+    []
   );
 
 
@@ -1476,13 +1822,16 @@ export const AuthProvider = ({ children }) => {
      * Theme
      */
     isDarkMode,
-    toggleGlobalTheme,
 
     /*
-     * Biometrics
+     * Biometrics and app lock
      */
     isBiometricsEnabled,
     toggleBiometrics,
+    passwordLockEnabled,
+    enablePasswordLock,
+    disablePasswordLock,
+    verifyPasswordLock,
     isAppLocked,
     authenticateBiometricsManually,
   };

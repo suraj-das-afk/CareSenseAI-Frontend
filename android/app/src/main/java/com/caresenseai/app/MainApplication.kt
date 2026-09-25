@@ -28,6 +28,7 @@ class MainApplication : Application(), ReactApplication {
         override fun getPackages(): List<ReactPackage> =
           PackageList(this).packages.apply {
             add(CareSenseAppCheckPackage())
+            add(CareSenseBleDiagnosticPackage())
           }
 
           override fun getJSMainModuleName(): String = ".expo/.virtual-metro-entry"

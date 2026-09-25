@@ -8,9 +8,9 @@ import React, {
 
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -18,7 +18,7 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
+  Pressable,
   View,
   StatusBar,
   useWindowDimensions,
@@ -29,6 +29,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as ImagePicker from 'expo-image-picker';
 
 import { AuthContext } from '../context/AuthContext';
+import { PopupContext } from '../context/PopupContext';
 import { uploadProfileImage } from '../services/cloudinary';
 
 import {
@@ -86,6 +87,60 @@ const getTheme = isDark => ({
     ? 'rgba(239, 68, 68, 0.12)'
     : '#FEF2F2',
 });
+
+function AnimatedButton({
+  children,
+  onPress,
+  onLongPress,
+  style,
+  pressableStyle,
+  disabled = false,
+  accessibilityLabel,
+  accessibilityHint,
+  hitSlop,
+}) {
+  const scale = useRef(new Animated.Value(1)).current;
+
+  const animateTo = toValue => {
+    Animated.spring(scale, {
+      toValue,
+      useNativeDriver: true,
+      speed: 45,
+      bounciness: 4,
+    }).start();
+  };
+
+  return (
+    <Pressable
+      style={pressableStyle}
+      onPressIn={() => {
+        if (!disabled) animateTo(0.975);
+      }}
+      onPressOut={() => {
+        if (!disabled) animateTo(1);
+      }}
+      onPress={disabled ? undefined : onPress}
+      onLongPress={disabled ? undefined : onLongPress}
+      disabled={disabled}
+      hitSlop={hitSlop}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityHint={accessibilityHint}
+    >
+      <Animated.View
+        style={[
+          style,
+          {
+            transform: [{ scale }],
+          },
+        ]}
+      >
+        {children}
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 
 const normalizeDateOfBirth = value => {
   if (!value) {
@@ -316,6 +371,8 @@ export default function OnboardingScreen() {
     isDarkMode,
   } = useContext(AuthContext);
 
+  const { showPopup } = useContext(PopupContext) || {};
+
   const isDark = Boolean(isDarkMode);
 
   const theme = useMemo(
@@ -378,6 +435,9 @@ export default function OnboardingScreen() {
   const [photoUploading, setPhotoUploading] =
     useState(false);
 
+  const [photoLoadFailed, setPhotoLoadFailed] =
+    useState(false);
+
   const [
     notificationsEnabled,
     setNotificationsEnabled,
@@ -397,6 +457,16 @@ export default function OnboardingScreen() {
     focusedField,
     setFocusedField,
   ] = useState(null);
+
+  const [
+    keyboardVisible,
+    setKeyboardVisible,
+  ] = useState(false);
+
+  // Native handle of the input that opened the keyboard.
+  // We defer the scroll until the keyboard is actually visible so Android
+  // has finished resizing the viewport before we calculate the target.
+  const pendingKeyboardTargetRef = useRef(null);
 
   const [form, setForm] =
     useState({
@@ -632,80 +702,117 @@ export default function OnboardingScreen() {
   }, [step]);
 
   /*
-   * Animate step transitions
-   * and progress bar.
+   * Animate onboarding step transitions,
+   * progress, and the step identity icon.
    */
+  const stepIconScale =
+    useRef(
+      new Animated.Value(0.9),
+    ).current;
+
+  const stepIconOpacity =
+    useRef(
+      new Animated.Value(0),
+    ).current;
+
   useEffect(() => {
     const target =
       (step + 1) /
       STEPS.length;
 
-    Animated.parallel([
-      Animated.timing(
-        progressAnim,
-        {
-          toValue: target,
-          duration: 300,
-          useNativeDriver: false,
-        },
-      ),
+    fadeAnim.stopAnimation();
+    slideAnim.stopAnimation();
+    progressAnim.stopAnimation();
+    stepIconScale.stopAnimation();
+    stepIconOpacity.stopAnimation();
 
-      Animated.sequence([
-        Animated.parallel([
-          Animated.timing(
-            fadeAnim,
-            {
-              toValue: 0,
-              duration: 90,
-              useNativeDriver: true,
-            },
-          ),
+    fadeAnim.setValue(0);
+    slideAnim.setValue(12);
+    stepIconScale.setValue(0.9);
+    stepIconOpacity.setValue(0);
 
-          Animated.timing(
-            slideAnim,
-            {
-              toValue: 10,
-              duration: 90,
-              useNativeDriver: true,
-            },
-          ),
-        ]),
-
-        Animated.parallel([
-          Animated.timing(
-            fadeAnim,
-            {
-              toValue: 1,
-              duration: 220,
-              useNativeDriver: true,
-            },
-          ),
-
-          Animated.timing(
-            slideAnim,
-            {
-              toValue: 0,
-              duration: 220,
-              useNativeDriver: true,
-            },
-          ),
-        ]),
-      ]),
-    ]).start();
-
-    requestAnimationFrame(
-      () => {
-        scrollRef.current?.scrollTo({
-          y: 0,
-          animated: true,
-        });
+    const progressAnimation = Animated.timing(
+      progressAnim,
+      {
+        toValue: target,
+        duration: 320,
+        useNativeDriver: false,
       },
     );
+
+    const contentAnimation = Animated.parallel([
+      Animated.timing(
+        fadeAnim,
+        {
+          toValue: 1,
+          duration: 260,
+          useNativeDriver: true,
+        },
+      ),
+      Animated.spring(
+        slideAnim,
+        {
+          toValue: 0,
+          useNativeDriver: true,
+          damping: 18,
+          stiffness: 155,
+          mass: 0.8,
+        },
+      ),
+    ]);
+
+    const iconAnimation = Animated.sequence([
+      Animated.delay(55),
+      Animated.parallel([
+        Animated.timing(
+          stepIconOpacity,
+          {
+            toValue: 1,
+            duration: 180,
+            useNativeDriver: true,
+          },
+        ),
+        Animated.spring(
+          stepIconScale,
+          {
+            toValue: 1,
+            useNativeDriver: true,
+            damping: 13,
+            stiffness: 190,
+            mass: 0.65,
+          },
+        ),
+      ]),
+    ]);
+
+    progressAnimation.start();
+    Animated.parallel([
+      contentAnimation,
+      iconAnimation,
+    ]).start();
+
+    const timeout = setTimeout(() => {
+      scrollRef.current?.scrollTo({
+        y: 0,
+        animated: true,
+      });
+    }, 0);
+
+    return () => {
+      clearTimeout(timeout);
+      fadeAnim.stopAnimation();
+      slideAnim.stopAnimation();
+      progressAnim.stopAnimation();
+      stepIconScale.stopAnimation();
+      stepIconOpacity.stopAnimation();
+    };
   }, [
     step,
     fadeAnim,
     progressAnim,
     slideAnim,
+    stepIconScale,
+    stepIconOpacity,
   ]);
 
   const updateField = (
@@ -737,9 +844,10 @@ export default function OnboardingScreen() {
             );
 
           if (!normalized) {
-            Alert.alert(
+            showPopup?.(
               'Invalid date of birth',
               'Use DD/MM/YYYY, for example 18/09/2003, or leave it blank.',
+              'warning',
             );
 
             return false;
@@ -776,9 +884,10 @@ export default function OnboardingScreen() {
             height > 300
           )
         ) {
-          Alert.alert(
+          showPopup?.(
             'Check your height',
             'Please enter a height between 30 and 300 cm.',
+            'warning',
           );
 
           return false;
@@ -794,9 +903,10 @@ export default function OnboardingScreen() {
             weight > 500
           )
         ) {
-          Alert.alert(
+          showPopup?.(
             'Check your weight',
             'Please enter a weight between 1 and 500 kg.',
+            'warning',
           );
 
           return false;
@@ -814,9 +924,10 @@ export default function OnboardingScreen() {
             .trim()
             .length < 7
         ) {
-          Alert.alert(
+          showPopup?.(
             'Check the phone number',
             'Please enter a valid emergency contact number or leave it blank.',
+            'warning',
           );
 
           return false;
@@ -848,6 +959,9 @@ export default function OnboardingScreen() {
       return;
     }
 
+    Keyboard.dismiss();
+    setFocusedField(null);
+
     if (
       step <
       STEPS.length - 1
@@ -860,6 +974,8 @@ export default function OnboardingScreen() {
 
   const previousStep = () => {
     if (step > 0) {
+      Keyboard.dismiss();
+      setFocusedField(null);
       transitionToStep(
         step - 1,
       );
@@ -871,34 +987,28 @@ export default function OnboardingScreen() {
       return;
     }
 
-    Alert.alert(
+    Keyboard.dismiss();
+
+    showPopup?.(
       'Switch account?',
       'You will be signed out and returned to Login. From there you can choose the correct Google account or open Sign Up.',
-      [
-        {
-          text: 'Stay here',
-          style: 'cancel',
-        },
-        {
-          text: 'Switch account',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await logout();
-            } catch (error) {
-              console.error(
-                'Onboarding account switch error:',
-                error,
-              );
+      'warning',
+      async () => {
+        try {
+          await logout();
+        } catch (error) {
+          console.error(
+            'Onboarding account switch error:',
+            error,
+          );
 
-              Alert.alert(
-                'Unable to sign out',
-                'Please try again.',
-              );
-            }
-          },
-        },
-      ],
+          showPopup?.(
+            'Unable to sign out',
+            'Please try again.',
+            'error',
+          );
+        }
+      },
     );
   };
 
@@ -914,20 +1024,13 @@ export default function OnboardingScreen() {
         if (
           !permission.granted
         ) {
-          Alert.alert(
+          showPopup?.(
             'Photo permission needed',
-            'CareSense only requests photo access when you choose to add a profile picture.',
-            [
-              {
-                text: 'Not now',
-                style: 'cancel',
-              },
-              {
-                text: 'Open settings',
-                onPress: () =>
-                  Linking.openSettings(),
-              },
-            ],
+            'CareSense only requests photo access when you choose to add a profile picture. Tap Confirm to open device settings.',
+            'warning',
+            () => {
+              Linking.openSettings();
+            },
           );
 
           return;
@@ -960,6 +1063,8 @@ export default function OnboardingScreen() {
         const selectedUri =
           result.assets[0].uri;
 
+        setPhotoLoadFailed(false);
+
         setPhotoPreviewUri(
           selectedUri,
         );
@@ -981,6 +1086,8 @@ export default function OnboardingScreen() {
           );
         }
 
+        setPhotoLoadFailed(false);
+
         setPhotoUri(
           uploaded.secure_url,
         );
@@ -998,10 +1105,11 @@ export default function OnboardingScreen() {
           null,
         );
 
-        Alert.alert(
+        showPopup?.(
           'Photo upload failed',
           error?.message ||
             'Unable to upload your profile photo right now.',
+          'error',
         );
       } finally {
         setPhotoUploading(
@@ -1049,9 +1157,10 @@ export default function OnboardingScreen() {
             true,
           );
 
-          Alert.alert(
+          showPopup?.(
             'Notifications enabled',
             'CareSense can now send important reminders and updates.',
+            'success',
           );
 
           return;
@@ -1065,28 +1174,22 @@ export default function OnboardingScreen() {
           result?.canAskAgain ===
           false
         ) {
-          Alert.alert(
+          showPopup?.(
             'Notifications are off',
-            'Notifications are currently disabled for CareSense. You can enable them later from device settings.',
-            [
-              {
-                text: 'Later',
-                style: 'cancel',
-              },
-              {
-                text: 'Open settings',
-                onPress: () =>
-                  Linking.openSettings(),
-              },
-            ],
+            'Notifications are currently disabled for CareSense. Tap Confirm to open device settings.',
+            'warning',
+            () => {
+              Linking.openSettings();
+            },
           );
 
           return;
         }
 
-        Alert.alert(
+        showPopup?.(
           'Not enabled',
           'You can continue onboarding and enable notifications later.',
+          'info',
         );
       } catch (error) {
         console.error(
@@ -1097,9 +1200,10 @@ export default function OnboardingScreen() {
         if (
           mountedRef.current
         ) {
-          Alert.alert(
+          showPopup?.(
             'Permission error',
             'We could not update notification permission right now. You can continue onboarding and try again later.',
+            'error',
           );
         }
       } finally {
@@ -1256,10 +1360,13 @@ export default function OnboardingScreen() {
           error?.response?.data || error,
         );
 
-        Alert.alert(
-          'Unable to save profile',
-          getApiErrorMessage(error),
-        );
+        if (mountedRef.current) {
+          showPopup?.(
+            'Unable to save profile',
+            getApiErrorMessage(error),
+            'error',
+          );
+        }
       } finally {
         if (mountedRef.current) {
           setSaving(false);
@@ -1359,22 +1466,50 @@ export default function OnboardingScreen() {
               ? form[field]
               : formatListField(form[field])
           }
-          onFocus={() =>
-            setFocusedField(
-              field,
-            )
-          }
-          onBlur={() =>
-            setFocusedField(
-              null,
-            )
-          }
+          onFocus={event => {
+            setFocusedField(field);
+
+            const nativeTarget =
+              event?.nativeEvent?.target;
+
+            pendingKeyboardTargetRef.current =
+              nativeTarget || null;
+
+            const scrollInputIntoView = () => {
+              const target =
+                pendingKeyboardTargetRef.current;
+
+              const responder =
+                scrollRef.current?.getScrollResponder?.();
+
+              if (
+                !target ||
+                !responder?.scrollResponderScrollNativeHandleToKeyboard
+              ) {
+                return;
+              }
+
+              responder.scrollResponderScrollNativeHandleToKeyboard(
+                target,
+                Platform.OS === 'android' ? 72 : 32,
+                true,
+              );
+            };
+
+            requestAnimationFrame(scrollInputIntoView);
+            setTimeout(scrollInputIntoView, Platform.OS === 'android' ? 220 : 120);
+          }}
+          onBlur={() => {
+            setFocusedField(null);
+            pendingKeyboardTargetRef.current = null;
+          }}
           onChangeText={value =>
             updateField(
               field,
               value,
             )
           }
+          accessibilityLabel={label}
           autoCorrect={
             textInputOptions.autoCorrect ?? false
           }
@@ -1403,9 +1538,9 @@ export default function OnboardingScreen() {
   };
 
   const renderStep = () => {
-    switch (
-      STEPS[step].key
-    ) {
+    const activeStepKey = STEPS[step]?.key;
+
+    switch (activeStepKey) {
       /*
        * BASIC
        */
@@ -1539,8 +1674,9 @@ export default function OnboardingScreen() {
                 },
               ]}
             >
-              {photoPreviewUri ||
-              photoUri ? (
+              {
+                (photoPreviewUri || photoUri) &&
+                !photoLoadFailed ? (
                 <Image
                   source={{
                     uri:
@@ -1550,6 +1686,9 @@ export default function OnboardingScreen() {
                   style={
                     styles.profilePhoto
                   }
+                  onLoad={() => setPhotoLoadFailed(false)}
+                  onError={() => setPhotoLoadFailed(true)}
+                  accessibilityLabel="CareSense profile photo"
                 />
               ) : (
                 <View
@@ -1599,13 +1738,15 @@ export default function OnboardingScreen() {
                 {
                   backgroundColor:
                     photoUri &&
-                    !photoPreviewUri
+                    !photoPreviewUri &&
+                    !photoLoadFailed
                       ? theme.successBg
                       : theme.inputBg,
 
                   borderColor:
                     photoUri &&
-                    !photoPreviewUri
+                    !photoPreviewUri &&
+                    !photoLoadFailed
                       ? theme.successBorder
                       : theme.border,
                 },
@@ -1614,14 +1755,16 @@ export default function OnboardingScreen() {
               <Ionicons
                 name={
                   photoUri &&
-                  !photoPreviewUri
+                  !photoPreviewUri &&
+                  !photoLoadFailed
                     ? 'checkmark-circle'
                     : 'image-outline'
                 }
                 size={15}
                 color={
                   photoUri &&
-                  !photoPreviewUri
+                  !photoPreviewUri &&
+                  !photoLoadFailed
                     ? '#10B981'
                     : theme.textSecondary
                 }
@@ -1633,20 +1776,24 @@ export default function OnboardingScreen() {
                   {
                     color:
                       photoUri &&
-                      !photoPreviewUri
+                      !photoPreviewUri &&
+                      !photoLoadFailed
                         ? '#10B981'
                         : theme.textSecondary,
                   },
                 ]}
               >
                 {photoUri &&
-                !photoPreviewUri
+                !photoPreviewUri &&
+                !photoLoadFailed
                   ? 'Profile photo ready'
-                  : 'No photo selected'}
+                  : photoLoadFailed
+                    ? 'Photo could not be loaded'
+                    : 'No photo selected'}
               </Text>
             </View>
 
-            <TouchableOpacity
+            <AnimatedButton
               style={[
                 styles.primaryWideButton,
                 {
@@ -1665,6 +1812,7 @@ export default function OnboardingScreen() {
               disabled={
                 photoUploading
               }
+              accessibilityLabel="Choose profile photo"
               activeOpacity={0.84}
             >
               {photoUploading ? (
@@ -1695,7 +1843,7 @@ export default function OnboardingScreen() {
                     ? 'Change profile photo'
                     : 'Choose profile photo'}
               </Text>
-            </TouchableOpacity>
+            </AnimatedButton>
 
             <View
               style={[
@@ -1740,8 +1888,9 @@ export default function OnboardingScreen() {
                 },
               ]}
             >
-              Optional. You can skip this step and add a photo
-              later from Settings.
+              {photoLoadFailed
+                ? 'We could not display that image. Choose another photo or continue without one.'
+                : 'Optional. You can skip this step and add a photo later from Settings.'}
             </Text>
           </View>
         );
@@ -1876,7 +2025,7 @@ export default function OnboardingScreen() {
               </View>
 
               {!notificationsEnabled && (
-                <TouchableOpacity
+                <AnimatedButton
                   style={[
                     styles.primaryWideButton,
                     {
@@ -1895,6 +2044,7 @@ export default function OnboardingScreen() {
                   disabled={
                     notificationsLoading
                   }
+                  accessibilityLabel="Enable notifications"
                   activeOpacity={0.84}
                 >
                   {notificationsLoading ? (
@@ -1921,7 +2071,7 @@ export default function OnboardingScreen() {
                   >
                     Enable notifications
                   </Text>
-                </TouchableOpacity>
+                </AnimatedButton>
               )}
             </View>
 
@@ -2390,11 +2540,80 @@ export default function OnboardingScreen() {
   };
 
   const currentStep =
-    STEPS[step];
+    STEPS[step] || STEPS[0];
 
   const isLastStep =
     step ===
     STEPS.length - 1;
+
+  const progressPercent =
+    Math.round(
+      ((step + 1) / STEPS.length) * 100,
+    );
+
+  useEffect(() => {
+    const showEvent =
+      Platform.OS === 'ios'
+        ? 'keyboardWillShow'
+        : 'keyboardDidShow';
+
+    const hideEvent =
+      Platform.OS === 'ios'
+        ? 'keyboardWillHide'
+        : 'keyboardDidHide';
+
+    const scrollInputIntoView = () => {
+      const target =
+        pendingKeyboardTargetRef.current;
+
+      const responder =
+        scrollRef.current?.getScrollResponder?.();
+
+      if (
+        !target ||
+        !responder?.scrollResponderScrollNativeHandleToKeyboard
+      ) {
+        return;
+      }
+
+      responder.scrollResponderScrollNativeHandleToKeyboard(
+        target,
+        Platform.OS === 'android' ? 72 : 32,
+        true,
+      );
+    };
+
+    const showSubscription =
+      Keyboard.addListener(
+        showEvent,
+        () => {
+          setKeyboardVisible(true);
+
+          // Let Android finish the viewport resize before scrolling.
+          requestAnimationFrame(() => {
+            setTimeout(scrollInputIntoView, Platform.OS === 'android' ? 140 : 80);
+          });
+        },
+      );
+
+    const hideSubscription =
+      Keyboard.addListener(
+        hideEvent,
+        () => {
+          setKeyboardVisible(false);
+        },
+      );
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  const signedInLabel =
+    user?.email ||
+    user?.displayName ||
+    'Signed-in account';
 
   return (
     <SafeAreaView
@@ -2417,17 +2636,11 @@ export default function OnboardingScreen() {
         }
       />
 
-      <KeyboardAvoidingView
-        style={
-          styles.container
-        }
-        behavior={
-          Platform.OS === 'ios'
-            ? 'padding'
-            : 'height'
-        }
+      <View
+        style={styles.container}
       >
         {/* HEADER */}
+        {!keyboardVisible && (
         <View
           style={[
             styles.header,
@@ -2460,6 +2673,18 @@ export default function OnboardingScreen() {
               ]}
             >
               Your health profile
+            </Text>
+
+            <Text
+              style={[
+                styles.accountEmail,
+                {
+                  color: theme.textSecondary,
+                },
+              ]}
+              numberOfLines={1}
+            >
+              {signedInLabel}
             </Text>
           </View>
 
@@ -2513,7 +2738,10 @@ export default function OnboardingScreen() {
           </View>
         </View>
 
-        <TouchableOpacity
+        )}
+
+        {!keyboardVisible && (
+        <AnimatedButton
           style={[
             styles.accountSwitchButton,
             {
@@ -2523,6 +2751,8 @@ export default function OnboardingScreen() {
           ]}
           onPress={handleWrongAccount}
           disabled={saving || photoUploading}
+          accessibilityLabel="Use a different account"
+          accessibilityHint="Signs out so you can choose another account"
           activeOpacity={0.78}
         >
           <Ionicons
@@ -2552,12 +2782,17 @@ export default function OnboardingScreen() {
           >
             Use a different account
           </Text>
-        </TouchableOpacity>
+        </AnimatedButton>
+
+        )}
 
         {/* PROGRESS */}
         <View
           style={[
             styles.progressWrap,
+            keyboardVisible
+              ? styles.progressWrapKeyboard
+              : null,
             {
               width: contentWidth,
               alignSelf: 'center',
@@ -2574,48 +2809,71 @@ export default function OnboardingScreen() {
             ]}
           >
             <Animated.View
-            style={[
-              styles.progressFill,
-              {
-                backgroundColor:
-                  theme.accent,
+              style={[
+                styles.progressFill,
+                {
+                  backgroundColor:
+                    theme.accent,
 
-                width:
-                  progressAnim.interpolate(
-                    {
-                      inputRange: [
-                        0,
-                        1,
-                      ],
+                  width:
+                    progressAnim.interpolate(
+                      {
+                        inputRange: [
+                          0,
+                          1,
+                        ],
 
-                      outputRange: [
-                        '0%',
-                        '100%',
-                      ],
-                    },
-                  ),
-              },
-            ]}
+                        outputRange: [
+                          '0%',
+                          '100%',
+                        ],
+                      },
+                    ),
+                },
+              ]}
             />
+          </View>
+
+          <View style={styles.progressMeta}>
+            <Text
+              style={[
+                styles.progressMetaText,
+                { color: theme.textSecondary },
+              ]}
+            >
+              Step {step + 1} of {STEPS.length}
+            </Text>
+
+            <Text
+              style={[
+                styles.progressMetaText,
+                { color: theme.accent, fontWeight: '800' },
+              ]}
+            >
+              {progressPercent}% complete
+            </Text>
           </View>
         </View>
 
-        <ScrollView
-          ref={scrollRef}
-          style={styles.scrollView}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode={
-            Platform.OS === 'ios'
-              ? 'interactive'
-              : 'on-drag'
-          }
-          contentContainerStyle={[
-            styles.scrollContent,
-            {
-              paddingHorizontal: 0,
-            },
-          ]}
+        <KeyboardAvoidingView
+          style={styles.contentArea}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+        >
+          <ScrollView
+            ref={scrollRef}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode={Platform.OS === 'ios' ? 'interactive' : 'on-drag'}
+            contentContainerStyle={[
+              styles.scrollContent,
+              keyboardVisible ? styles.scrollContentKeyboard : null,
+              {
+                paddingHorizontal: 0,
+                paddingTop: keyboardVisible ? 8 : 0,
+                paddingBottom: keyboardVisible ? 96 : 176,
+              },
+            ]}
         >
           <Animated.View
             style={[
@@ -2640,7 +2898,7 @@ export default function OnboardingScreen() {
                 styles.stepIdentity
               }
             >
-              <View
+              <Animated.View
                 style={[
                   styles.iconCircle,
                   {
@@ -2649,6 +2907,16 @@ export default function OnboardingScreen() {
 
                     borderColor:
                       theme.accentBorder,
+
+                    opacity:
+                      stepIconOpacity,
+
+                    transform: [
+                      {
+                        scale:
+                          stepIconScale,
+                      },
+                    ],
                   },
                 ]}
               >
@@ -2661,7 +2929,7 @@ export default function OnboardingScreen() {
                     theme.accent
                   }
                 />
-              </View>
+              </Animated.View>
 
               <View
                 style={[
@@ -2727,15 +2995,19 @@ export default function OnboardingScreen() {
               {renderStep()}
             </View>
           </Animated.View>
-        </ScrollView>
+          </ScrollView>
+        </KeyboardAvoidingView>
 
         {/* FOOTER */}
         <View
+          pointerEvents={keyboardVisible ? 'none' : 'auto'}
           style={[
             styles.footer,
+            keyboardVisible ? styles.footerKeyboardHidden : null,
             {
-              backgroundColor:
-                theme.background,
+              backgroundColor: isDark
+                ? 'rgba(10, 15, 26, 0.98)'
+                : 'rgba(255, 255, 255, 0.98)',
 
               borderTopColor:
                 theme.border,
@@ -2751,46 +3023,33 @@ export default function OnboardingScreen() {
               },
             ]}
           >
+          <View style={styles.footerActions}>
           {step > 0 ? (
-            <TouchableOpacity
+            <AnimatedButton
               style={[
                 styles.backButton,
                 {
-                  backgroundColor:
-                    theme.card,
-
-                  borderColor:
-                    theme.border,
+                  backgroundColor: theme.card,
+                  borderColor: theme.border,
                 },
               ]}
-              onPress={
-                previousStep
-              }
-              disabled={
-                saving ||
-                photoUploading
-              }
-              activeOpacity={
-                0.8
-              }
+              onPress={previousStep}
+              disabled={saving || photoUploading}
+              accessibilityLabel="Go to previous step"
             >
               <Ionicons
                 name="arrow-back"
                 size={20}
-                color={
-                  theme.textPrimary
-                }
+                color={theme.textPrimary}
               />
-            </TouchableOpacity>
-          ) : (
-            <View
-              style={
-                styles.backPlaceholder
-              }
-            />
-          )}
+            </AnimatedButton>
+          ) : null}
 
-          <TouchableOpacity
+          <AnimatedButton
+            pressableStyle={[
+              styles.continuePressable,
+              step === 0 ? styles.continuePressableFull : null,
+            ]}
             style={[
               styles.continueButton,
               {
@@ -2813,39 +3072,49 @@ export default function OnboardingScreen() {
               saving ||
               photoUploading
             }
+            accessibilityLabel={
+              isLastStep
+                ? 'Finish profile setup'
+                : 'Continue to next onboarding step'
+            }
             activeOpacity={
               0.84
             }
           >
-            <Text
-              style={
-                styles.continueText
-              }
-            >
-              {photoUploading
-                ? 'Uploading...'
-                : saving
-                  ? 'Saving...'
-                  : isLastStep
-                    ? 'Finish setup'
-                    : 'Continue'}
-            </Text>
+            <View style={styles.continueLabelWrap}>
+              {(saving || photoUploading) ? (
+                <ActivityIndicator
+                  size="small"
+                  color={BRAND.darkText}
+                />
+              ) : null}
 
-            {!saving &&
-              !photoUploading && (
+              <Text style={styles.continueText}>
+                {photoUploading
+                  ? 'Uploading...'
+                  : saving
+                    ? 'Saving...'
+                    : isLastStep
+                      ? 'Finish setup'
+                      : 'Continue'}
+              </Text>
+            </View>
+
+            {!saving && !photoUploading ? (
+              <View style={styles.continueIconBubble}>
                 <Ionicons
                   name={
                     isLastStep
                       ? 'checkmark'
                       : 'arrow-forward'
                   }
-                  size={20}
-                  color={
-                    BRAND.darkText
-                  }
+                  size={21}
+                  color={BRAND.darkText}
                 />
-              )}
-          </TouchableOpacity>
+              </View>
+            ) : null}
+          </AnimatedButton>
+          </View>
 
           <Text
             style={[
@@ -2860,7 +3129,7 @@ export default function OnboardingScreen() {
           </Text>
           </View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -2870,14 +3139,9 @@ const styles =
     safeArea: { flex: 1 },
     container: { flex: 1 },
 
-    scrollView: {
-      flex: 1,
-      minHeight: 0,
-    },
-
     header: {
-      paddingTop: 10,
-      paddingBottom: 10,
+      paddingTop: 12,
+      paddingBottom: 12,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
@@ -2897,6 +3161,14 @@ const styles =
       marginTop: 2,
     },
 
+    accountEmail: {
+      fontSize: 10.5,
+      lineHeight: 14,
+      fontWeight: '600',
+      marginTop: 3,
+      maxWidth: 230,
+    },
+
     accountSwitchButton: {
       width: '100%',
       minHeight: 42,
@@ -2913,13 +3185,17 @@ const styles =
     },
 
     accountSwitchText: {
+      flexShrink: 1,
       fontSize: 12,
+      lineHeight: 17,
       fontWeight: '600',
     },
 
     accountSwitchAction: {
+      flexShrink: 1,
       fontSize: 12,
-      fontWeight: '800',
+      lineHeight: 17,
+      fontWeight: '900',
     },
 
     stepBadge: {
@@ -2938,19 +3214,42 @@ const styles =
     stepBadgeTotal: { fontSize: 12, lineHeight: 15, fontWeight: '700' },
 
     progressWrap: {},
+
+    progressWrapKeyboard: {
+      marginTop: 2,
+      marginBottom: 6,
+    },
     progressTrack: {
-      height: 4,
+      height: 5,
       width: '100%',
       borderRadius: 99,
       overflow: 'hidden',
     },
     progressFill: { height: '100%', borderRadius: 99 },
 
+    progressMeta: {
+      marginTop: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 2,
+    },
+
+    progressMetaText: {
+      fontSize: 10,
+      lineHeight: 13,
+      fontWeight: '700',
+    },
+
     scrollContent: {
       flexGrow: 1,
       alignItems: 'center',
       paddingTop: 22,
-      paddingBottom: 28,
+      paddingBottom: 150,
+    },
+
+    scrollContentKeyboard: {
+      paddingTop: 16,
     },
 
     contentColumn: {
@@ -2961,7 +3260,7 @@ const styles =
     stepIdentity: {
       flexDirection: 'row',
       alignItems: 'center',
-      marginBottom: 16,
+      marginBottom: 18,
     },
 
     iconCircle: {
@@ -2990,16 +3289,16 @@ const styles =
     },
 
     title: {
-      fontSize: 30,
-      lineHeight: 36,
+      fontSize: 32,
+      lineHeight: 38,
       fontWeight: '900',
       letterSpacing: -0.9,
     },
 
     subtitle: {
-      fontSize: 14,
-      lineHeight: 20,
-      marginTop: 8,
+      fontSize: 14.5,
+      lineHeight: 21,
+      marginTop: 9,
       maxWidth: 520,
     },
 
@@ -3007,9 +3306,14 @@ const styles =
 
     sectionCard: {
       width: '100%',
-      borderRadius: 20,
+      borderRadius: 22,
       borderWidth: 1,
-      padding: 18,
+      padding: 20,
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 8 },
+      shadowOpacity: 0.08,
+      shadowRadius: 18,
+      elevation: 4,
     },
 
     sectionHeader: {
@@ -3061,8 +3365,8 @@ const styles =
 
     input: {
       width: '100%',
-      minHeight: 50,
-      borderRadius: 14,
+      minHeight: 54,
+      borderRadius: 16,
       borderWidth: 1,
       paddingHorizontal: 14,
       paddingVertical: 0,
@@ -3287,29 +3591,58 @@ const styles =
       marginLeft: 8,
     },
 
+    contentArea: {
+      flex: 1,
+      minHeight: 0,
+    },
+
     footer: {
-      flexShrink: 0,
-      borderTopWidth: StyleSheet.hairlineWidth,
-      paddingTop: 10,
-      paddingBottom: 10,
+      position: 'absolute',
+      left: 0,
+      right: 0,
+      bottom: 0,
+      borderTopWidth: 1,
+      paddingTop: 12,
+      paddingBottom: 12,
       shadowColor: '#000000',
-      shadowOffset: { width: 0, height: -2 },
-      shadowOpacity: 0.06,
-      shadowRadius: 8,
-      elevation: 7,
-      zIndex: 10,
+      shadowOffset: { width: 0, height: -6 },
+      shadowOpacity: 0.14,
+      shadowRadius: 18,
+      elevation: 16,
+      zIndex: 100,
+    },
+
+    footerKeyboardHidden: {
+      opacity: 0,
+      transform: [{ translateY: 18 }],
     },
 
     footerInner: {
+      alignItems: 'center',
+    },
+
+    footerActions: {
+      width: '100%',
       flexDirection: 'row',
       alignItems: 'center',
-      flexWrap: 'wrap',
+      minHeight: 54,
+    },
+
+    continuePressable: {
+      flex: 1,
+      minWidth: 0,
+      alignSelf: 'stretch',
+    },
+
+    continuePressableFull: {
+      flex: 0,
+      width: '100%',
     },
 
     backButton: {
-      width: 50,
-      height: 50,
-      borderRadius: 15,
+      width: 54,
+      height: 54,
+      borderRadius: 16,
       borderWidth: 1,
       alignItems: 'center',
       justifyContent: 'center',
@@ -3318,28 +3651,53 @@ const styles =
     },
 
     backPlaceholder: {
-      width: 50,
-      height: 50,
+      width: 54,
+      height: 54,
       marginRight: 10,
       flexShrink: 0,
     },
 
     continueButton: {
-      flex: 1,
-      minWidth: 0,
-      height: 50,
-      borderRadius: 15,
+      width: '100%',
+      height: 56,
+      borderRadius: 16,
+      paddingLeft: 20,
+      paddingRight: 8,
       flexDirection: 'row',
-      justifyContent: 'center',
+      justifyContent: 'space-between',
       alignItems: 'center',
-      gap: 8,
+      borderWidth: 1,
+      borderColor: 'rgba(10, 15, 26, 0.14)',
+      shadowColor: '#000000',
+      shadowOffset: { width: 0, height: 7 },
+      shadowOpacity: 0.18,
+      shadowRadius: 14,
+      elevation: 6,
+    },
+
+    continueLabelWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+      paddingLeft: 2,
+      minWidth: 0,
+    },
+
+    continueIconBubble: {
+      width: 42,
+      height: 42,
+      borderRadius: 13,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'rgba(10, 15, 26, 0.11)',
     },
 
     continueText: {
       color: BRAND.darkText,
-      fontSize: 14,
-      lineHeight: 18,
+      fontSize: 16,
+      lineHeight: 20,
       fontWeight: '900',
+      letterSpacing: -0.2,
     },
 
     footerHint: {
@@ -3347,6 +3705,7 @@ const styles =
       fontSize: 10.5,
       lineHeight: 15,
       textAlign: 'center',
-      marginTop: 7,
+      marginTop: 8,
+      paddingHorizontal: 4,
     },
   });

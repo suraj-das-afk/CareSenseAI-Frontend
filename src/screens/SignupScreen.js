@@ -137,6 +137,9 @@ const getSignupErrorMessage =
       case 'auth/too-many-requests':
         return 'Too many signup attempts. Please wait and try again later.';
 
+      case 'auth/verification-email-failed':
+        return 'Account was created, but we could not send the verification email. Please try signing up again later.';
+
       case 'auth/google-account-already-exists':
         return 'That Google account already has a CareSense AI account. Please use Log In instead.';
 
@@ -714,17 +717,28 @@ export default function SignupScreen({
             );
           }
 
-          await signup(
-            cleanName,
-            cleanEmail,
-            password,
-          );
+          const signupResult =
+            await signup(
+              cleanName,
+              cleanEmail,
+              password,
+            );
 
-          notify(
-            'Account created',
-            'Welcome to CareSense AI.',
-            'success',
-          );
+          if (
+            signupResult?.requiresEmailVerification
+          ) {
+            notify(
+              'Verify your email',
+              `We sent a verification link to ${signupResult.email || cleanEmail}. Verify it, then log in to CareSense AI.`,
+              'success',
+            );
+          } else {
+            notify(
+              'Account created',
+              'Welcome to CareSense AI.',
+              'success',
+            );
+          }
         } catch (error) {
           const message =
             getSignupErrorMessage(

@@ -1,8 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
   Image,
+  StatusBar,
   StyleSheet,
   Text,
   useColorScheme,
@@ -12,324 +13,693 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 const COLORS = {
-  lightBg: '#F0FAFF',
-  darkBg: '#07131C',
-  lightText: '#09233D',
+  lightBg: '#F6FBFD',
+  darkBg: '#06121B',
+  lightText: '#08233B',
   darkText: '#F5FBFF',
-  lightSub: '#58738A',
-  darkSub: '#9AB6C7',
+  lightSub: '#627B8D',
+  darkSub: '#9CB7C8',
   blue: '#0EA5E9',
   cyan: '#22D3EE',
+  teal: '#00D4C5',
   green: '#10B981',
 };
 
 const FLOATERS = [
-  ['heart-outline', 0.20, 0.23, 80],
-  ['medkit-outline', 0.80, 0.25, 220],
-  ['pulse-outline', 0.16, 0.48, 360],
-  ['shield-checkmark-outline', 0.84, 0.50, 500],
-  ['add-circle-outline', 0.29, 0.66, 640],
-  ['fitness-outline', 0.71, 0.66, 780],
+  { icon: 'pulse-outline', x: 0.18, y: 0.30, delay: 0 },
+  { icon: 'shield-checkmark-outline', x: 0.82, y: 0.30, delay: 120 },
+  { icon: 'medkit-outline', x: 0.15, y: 0.55, delay: 240 },
+  { icon: 'heart-outline', x: 0.85, y: 0.55, delay: 360 },
 ];
 
-function FloatingIcon({ name, left, top, delay, dark }) {
+function FloatingIcon({ icon, x, y, delay, dark }) {
   const opacity = useRef(new Animated.Value(0)).current;
-  const scale = useRef(new Animated.Value(0.7)).current;
-  const bob = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.72)).current;
+  const lift = useRef(new Animated.Value(4)).current;
 
   useEffect(() => {
-    const enter = setTimeout(() => {
+    const timer = setTimeout(() => {
       Animated.parallel([
         Animated.timing(opacity, {
           toValue: 1,
-          duration: 380,
+          duration: 360,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: true,
         }),
         Animated.spring(scale, {
           toValue: 1,
-          friction: 7,
-          tension: 70,
+          friction: 8,
+          tension: 75,
           useNativeDriver: true,
         }),
       ]).start();
 
       Animated.loop(
         Animated.sequence([
-          Animated.timing(bob, {
-            toValue: 1,
-            duration: 1300,
+          Animated.timing(lift, {
+            toValue: -3,
+            duration: 1200,
             easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
-          Animated.timing(bob, {
-            toValue: 0,
-            duration: 1300,
+          Animated.timing(lift, {
+            toValue: 4,
+            duration: 1200,
             easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
-        ])
+        ]),
       ).start();
     }, delay);
 
-    return () => clearTimeout(enter);
-  }, [delay, bob, opacity, scale]);
+    return () => {
+      clearTimeout(timer);
+      lift.stopAnimation();
+    };
+  }, [delay, lift, opacity, scale]);
 
   return (
     <Animated.View
       style={[
-        styles.floating,
+        styles.floatingIcon,
         {
-          left: `${left * 100}%`,
-          top: `${top * 100}%`,
-          backgroundColor: dark ? '#112A38' : '#FFFFFF',
-          borderColor: dark ? 'rgba(94,220,245,0.28)' : 'rgba(14,165,233,0.14)',
+          left: `${x * 100}%`,
+          top: `${y * 100}%`,
           opacity,
-          transform: [
-            { translateY: bob.interpolate({ inputRange: [0, 1], outputRange: [0, -6] }) },
-            { scale },
-          ],
+          transform: [{ translateY: lift }, { scale }],
+          backgroundColor: dark ? 'rgba(11, 35, 48, 0.96)' : 'rgba(255,255,255,0.96)',
+          borderColor: dark ? 'rgba(82,220,239,0.30)' : 'rgba(14,165,233,0.16)',
         },
       ]}
     >
-      <Ionicons name={name} size={22} color={dark ? '#54DDF4' : COLORS.blue} />
+      <Ionicons name={icon} size={20} color={dark ? '#61DFF0' : COLORS.blue} />
     </Animated.View>
   );
 }
 
-export default function AnimatedSplashScreen({
-  ready = false,
-  onFinish,
-}) {
+export default function AnimatedSplashScreen({ ready = true, onFinish }) {
   const dark = useColorScheme() === 'dark';
   const { width, height } = useWindowDimensions();
 
+  // Keep the background fully opaque until the splash is completely removed.
+  // This prevents the Login/Home screen from showing through during the fade.
+  const contentOpacity = useRef(new Animated.Value(1)).current;
+
   const logoOpacity = useRef(new Animated.Value(0)).current;
-  const logoScale = useRef(new Animated.Value(0.80)).current;
+  const logoScale = useRef(new Animated.Value(0.82)).current;
+  const logoY = useRef(new Animated.Value(12)).current;
+
   const ringOpacity = useRef(new Animated.Value(0)).current;
-  const ringScale = useRef(new Animated.Value(0.65)).current;
-  const pulse = useRef(new Animated.Value(1)).current;
+  const ringScale = useRef(new Animated.Value(0.82)).current;
+  const ringRotate = useRef(new Animated.Value(0)).current;
+
   const titleOpacity = useRef(new Animated.Value(0)).current;
-  const titleY = useRef(new Animated.Value(20)).current;
-  const subtitleOpacity = useRef(new Animated.Value(0)).current;
+  const titleY = useRef(new Animated.Value(14)).current;
+  const taglineOpacity = useRef(new Animated.Value(0)).current;
+  const taglineY = useRef(new Animated.Value(8)).current;
+
   const progress = useRef(new Animated.Value(0)).current;
-  const fadeOut = useRef(new Animated.Value(1)).current;
-  const splashStartedAt = useRef(Date.now()).current;
-  const finishTimerRef = useRef(null);
-  const finishStartedRef = useRef(false);
+  const progressShimmer = useRef(new Animated.Value(-1)).current;
+  const statusOpacity = useRef(new Animated.Value(0)).current;
+
+  const [sequenceReady, setSequenceReady] = useState(false);
+  const [statusText, setStatusText] = useState('Preparing your health companion...');
+
+  const trackWidth = Math.min(250, Math.max(190, width * 0.57));
 
   useEffect(() => {
-    const heartbeat = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1.045, duration: 260, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1.0, duration: 180, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1.065, duration: 240, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 1.0, duration: 420, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
-        Animated.delay(550),
-      ])
-    );
+    let mounted = true;
+    const timers = [];
 
     Animated.parallel([
+      Animated.timing(logoOpacity, {
+        toValue: 1,
+        duration: 480,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.spring(logoScale, {
+        toValue: 1,
+        friction: 7,
+        tension: 70,
+        useNativeDriver: true,
+      }),
+      Animated.timing(logoY, {
+        toValue: 0,
+        duration: 480,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    Animated.sequence([
+      Animated.delay(180),
       Animated.parallel([
-        Animated.timing(logoOpacity, { toValue: 1, duration: 500, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        Animated.spring(logoScale, { toValue: 1, friction: 7, tension: 70, useNativeDriver: true }),
-      ]),
-      Animated.sequence([
-        Animated.delay(280),
-        Animated.parallel([
-          Animated.timing(ringOpacity, { toValue: 1, duration: 240, useNativeDriver: true }),
-          Animated.spring(ringScale, { toValue: 1, friction: 8, tension: 55, useNativeDriver: true }),
-        ]),
-      ]),
-      Animated.sequence([
-        Animated.delay(820),
-        Animated.parallel([
-          Animated.timing(titleOpacity, { toValue: 1, duration: 460, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-          Animated.timing(titleY, { toValue: 0, duration: 460, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-        ]),
-      ]),
-      Animated.sequence([
-        Animated.delay(1100),
-        Animated.timing(subtitleOpacity, { toValue: 1, duration: 430, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
-      ]),
-      Animated.sequence([
-        Animated.delay(900),
-        Animated.timing(progress, { toValue: 1, duration: 2500, easing: Easing.inOut(Easing.cubic), useNativeDriver: false }),
+        Animated.timing(ringOpacity, {
+          toValue: 1,
+          duration: 420,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.spring(ringScale, {
+          toValue: 1,
+          friction: 8,
+          tension: 55,
+          useNativeDriver: true,
+        }),
       ]),
     ]).start();
 
-    heartbeat.start();
+    Animated.loop(
+      Animated.timing(ringRotate, {
+        toValue: 1,
+        duration: 7200,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    ).start();
 
-    return () => {
-      heartbeat.stop();
-    };
-  }, [fadeOut, logoOpacity, logoScale, onFinish, progress, pulse, ringOpacity, ringScale, subtitleOpacity, titleOpacity, titleY]);
+    Animated.sequence([
+      Animated.delay(560),
+      Animated.parallel([
+        Animated.timing(titleOpacity, {
+          toValue: 1,
+          duration: 430,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(titleY, {
+          toValue: 0,
+          duration: 430,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
 
-  useEffect(() => {
-  if (!ready || finishStartedRef.current) {
-    return;
-  }
+    Animated.sequence([
+      Animated.delay(760),
+      Animated.parallel([
+        Animated.timing(taglineOpacity, {
+          toValue: 1,
+          duration: 380,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+        Animated.timing(taglineY, {
+          toValue: 0,
+          duration: 380,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start();
 
-  const elapsed =
-    Date.now() - splashStartedAt;
+    Animated.sequence([
+      Animated.delay(850),
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 1700,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: false,
+      }),
+    ]).start();
 
-  const minimumDuration = 4200;
+    Animated.timing(statusOpacity, {
+      toValue: 1,
+      duration: 320,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
 
-  const remaining =
-    Math.max(
-      0,
-      minimumDuration - elapsed,
+    timers.push(
+      setTimeout(() => {
+        if (mounted) setStatusText('Securing your session...');
+      }, 950),
+      setTimeout(() => {
+        if (mounted) setStatusText('Preparing your health companion...');
+      }, 1550),
+      setTimeout(() => {
+        if (mounted) setStatusText('Almost there...');
+      }, 2250),
+      setTimeout(() => {
+        if (mounted) setSequenceReady(true);
+      }, 2740),
     );
 
-  finishTimerRef.current =
-    setTimeout(() => {
-      if (finishStartedRef.current) {
-        return;
-      }
+    const shimmer = Animated.loop(
+      Animated.timing(progressShimmer, {
+        toValue: 1,
+        duration: 1200,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    );
+    shimmer.start();
 
-      finishStartedRef.current = true;
+    return () => {
+      mounted = false;
+      timers.forEach(clearTimeout);
+      shimmer.stop();
+      ringRotate.stopAnimation();
+      ringScale.stopAnimation();
+      logoOpacity.stopAnimation();
+      logoScale.stopAnimation();
+      logoY.stopAnimation();
+      titleOpacity.stopAnimation();
+      titleY.stopAnimation();
+      taglineOpacity.stopAnimation();
+      taglineY.stopAnimation();
+      progress.stopAnimation();
+      progressShimmer.stopAnimation();
+      statusOpacity.stopAnimation();
+    };
+  }, [
+    logoOpacity,
+    logoScale,
+    logoY,
+    progress,
+    progressShimmer,
+    ringOpacity,
+    ringRotate,
+    ringScale,
+    statusOpacity,
+    taglineOpacity,
+    taglineY,
+    titleOpacity,
+    titleY,
+  ]);
 
-      Animated.timing(
-        fadeOut,
-        {
-          toValue: 0,
-          duration: 500,
-          easing: Easing.inOut(
-            Easing.cubic,
-          ),
-          useNativeDriver: true,
-        },
-      ).start(({ finished }) => {
-        if (finished) {
-          onFinish?.();
-        }
+  useEffect(() => {
+    if (!ready || !sequenceReady) return undefined;
+
+    const timer = setTimeout(() => {
+      Animated.timing(contentOpacity, {
+        toValue: 0,
+        duration: 330,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) onFinish?.();
       });
-    }, remaining);
+    }, 100);
 
-  return () => {
-    if (finishTimerRef.current) {
-      clearTimeout(
-        finishTimerRef.current,
-      );
-      finishTimerRef.current = null;
-    }
-  };
-}, [
-  ready,
-  fadeOut,
-  onFinish,
-  splashStartedAt,
-]);
+    return () => clearTimeout(timer);
+  }, [contentOpacity, onFinish, ready, sequenceReady]);
 
-  const trackWidth = Math.min(230, Math.max(175, width * 0.52));
+  const ringRotation = ringRotate.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  const counterRotation = ringRotate.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['360deg', '0deg'],
+  });
+
+  const shimmerTranslate = progressShimmer.interpolate({
+    inputRange: [-1, 1],
+    outputRange: [-70, trackWidth + 70],
+  });
 
   return (
-    <Animated.View
+    <View
       style={[
         styles.root,
-        { width, height, backgroundColor: dark ? COLORS.darkBg : COLORS.lightBg, opacity: fadeOut },
+        {
+          width,
+          height,
+          backgroundColor: dark ? COLORS.darkBg : COLORS.lightBg,
+        },
       ]}
     >
-      <View style={[styles.glow, { backgroundColor: dark ? 'rgba(14,165,233,0.10)' : 'rgba(14,165,233,0.12)' }]} />
-
-      <Animated.View
-        style={[
-          styles.ringOuter,
-          {
-            opacity: ringOpacity,
-            borderColor: dark ? 'rgba(74,213,244,0.23)' : 'rgba(14,165,233,0.18)',
-            transform: [{ scale: ringScale }],
-          },
-        ]}
-      />
-      <Animated.View
-        style={[
-          styles.ringInner,
-          {
-            opacity: ringOpacity,
-            borderColor: dark ? 'rgba(16,185,129,0.24)' : 'rgba(16,185,129,0.16)',
-            transform: [{ scale: ringScale }],
-          },
-        ]}
+      <StatusBar
+        translucent={false}
+        backgroundColor={dark ? COLORS.darkBg : COLORS.lightBg}
+        barStyle={dark ? 'light-content' : 'dark-content'}
       />
 
-      {FLOATERS.map(([name, left, top, delay]) => (
-        <FloatingIcon
-          key={`${name}-${delay}`}
-          name={name}
-          left={left}
-          top={top}
-          delay={delay}
-          dark={dark}
-        />
-      ))}
-
       <Animated.View
         style={[
-          styles.logoStage,
-          {
-            opacity: logoOpacity,
-            transform: [{ scale: Animated.multiply(logoScale, pulse) }],
-          },
+          styles.content,
+          { opacity: contentOpacity },
         ]}
       >
-        <View style={[styles.logoCard, { shadowColor: dark ? '#000000' : COLORS.blue }]}>
-          <Image
-            source={require('../../assets/images/caresense-logo-transparent.png')}
-            style={styles.logo}
-            resizeMode="contain"
-          />
-        </View>
-      </Animated.View>
-
-      <Animated.Text
-        style={[
-          styles.title,
-          { color: dark ? COLORS.darkText : COLORS.lightText, opacity: titleOpacity, transform: [{ translateY: titleY }] },
-        ]}
-      >
-        <Text style={{ color: dark ? COLORS.darkText : COLORS.lightText }}>Care</Text>
-        <Text style={{ color: dark ? '#49D3EE' : COLORS.blue }}>Sense</Text>
-        <Text style={{ color: dark ? COLORS.darkText : COLORS.lightText }}> AI</Text>
-      </Animated.Text>
-
-      <Animated.Text
-        style={[styles.subtitle, { color: dark ? COLORS.darkSub : COLORS.lightSub, opacity: subtitleOpacity }]}
-      >
-        Smarter Care for a Healthier You
-      </Animated.Text>
-
-      <View style={[styles.progressTrack, { width: trackWidth }]}>
-        <Animated.View
+        <View
+          pointerEvents="none"
           style={[
-            styles.progressFill,
+            styles.centerGlow,
             {
-              width: progress.interpolate({ inputRange: [0, 1], outputRange: [4, trackWidth] }),
-              backgroundColor: dark ? COLORS.cyan : COLORS.blue,
+              backgroundColor: dark
+                ? 'rgba(34,211,238,0.08)'
+                : 'rgba(14,165,233,0.06)',
             },
           ]}
         />
-      </View>
 
-      <Text style={[styles.footer, { color: dark ? '#82A4B9' : '#68839A' }]}>
-        Analyze  •  Understand  •  Care
-      </Text>
-    </Animated.View>
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.ringOuter,
+            {
+              opacity: ringOpacity,
+              transform: [
+                { scale: ringScale },
+                { rotate: ringRotation },
+              ],
+              borderColor: dark
+                ? 'rgba(78,220,240,0.24)'
+                : 'rgba(14,165,233,0.15)',
+            },
+          ]}
+        />
+
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.ringInner,
+            {
+              opacity: Animated.multiply(ringOpacity, 0.72),
+              transform: [
+                { scale: Animated.multiply(ringScale, 0.91) },
+                { rotate: counterRotation },
+              ],
+              borderColor: dark
+                ? 'rgba(16,185,129,0.24)'
+                : 'rgba(16,185,129,0.12)',
+            },
+          ]}
+        />
+
+        {FLOATERS.map(item => (
+          <FloatingIcon
+            key={`${item.icon}-${item.delay}`}
+            {...item}
+            dark={dark}
+          />
+        ))}
+
+        <Animated.View
+          style={[
+            styles.logoWrap,
+            {
+              opacity: logoOpacity,
+              transform: [
+                { translateY: logoY },
+                { scale: logoScale },
+              ],
+            },
+          ]}
+        >
+          <View
+            style={[
+              styles.logoCard,
+              {
+                borderColor: dark
+                  ? 'rgba(255,255,255,0.12)'
+                  : 'rgba(14,165,233,0.10)',
+              },
+            ]}
+          >
+            <Image
+              source={require('../../assets/images/caresense-logo-transparent.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+          </View>
+        </Animated.View>
+
+        <Animated.Text
+          style={[
+            styles.title,
+            {
+              opacity: titleOpacity,
+              transform: [{ translateY: titleY }],
+              color: dark ? COLORS.darkText : COLORS.lightText,
+            },
+          ]}
+        >
+          <Text style={{ color: dark ? COLORS.darkText : COLORS.lightText }}>
+            Care
+          </Text>
+          <Text style={{ color: dark ? '#43D9EF' : COLORS.teal }}>
+            Sense
+          </Text>
+          <Text style={{ color: dark ? COLORS.darkText : COLORS.lightText }}>
+            {' AI'}
+          </Text>
+        </Animated.Text>
+
+        <Animated.Text
+          style={[
+            styles.tagline,
+            {
+              opacity: taglineOpacity,
+              transform: [{ translateY: taglineY }],
+              color: dark ? COLORS.darkSub : COLORS.lightSub,
+            },
+          ]}
+        >
+          Your Health, Smarter Decisions
+        </Animated.Text>
+
+        <Animated.View
+          style={[
+            styles.pulseAccent,
+            { opacity: taglineOpacity },
+          ]}
+        >
+          <View
+            style={[
+              styles.pulseLine,
+              { backgroundColor: dark ? COLORS.cyan : COLORS.teal },
+            ]}
+          />
+          <View
+            style={[
+              styles.pulsePoint,
+              { backgroundColor: dark ? COLORS.cyan : COLORS.teal },
+            ]}
+          />
+          <View
+            style={[
+              styles.pulseLine,
+              styles.pulseLineRight,
+              { backgroundColor: dark ? COLORS.cyan : COLORS.teal },
+            ]}
+          />
+        </Animated.View>
+
+        <View
+          style={[
+            styles.progressTrack,
+            {
+              width: trackWidth,
+              backgroundColor: dark
+                ? 'rgba(156,183,200,0.14)'
+                : 'rgba(98,123,141,0.13)',
+            },
+          ]}
+        >
+          <Animated.View
+            style={[
+              styles.progressFill,
+              {
+                width: progress.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [5, trackWidth],
+                }),
+                backgroundColor: dark ? COLORS.cyan : COLORS.teal,
+              },
+            ]}
+          />
+
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.shimmer,
+              {
+                transform: [{ translateX: shimmerTranslate }],
+              },
+            ]}
+          />
+        </View>
+
+        <Animated.Text
+          style={[
+            styles.statusText,
+            {
+              opacity: statusOpacity,
+              color: dark ? COLORS.darkSub : COLORS.lightSub,
+            },
+          ]}
+        >
+          {statusText}
+        </Animated.Text>
+
+        <Text
+          style={[
+            styles.footer,
+            { color: dark ? '#7897A8' : '#718896' },
+          ]}
+        >
+          Analyze  •  Understand  •  Care
+        </Text>
+      </Animated.View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { position: 'absolute', left: 0, top: 0, zIndex: 9999, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
-  glow: { position: 'absolute', width: 430, height: 430, borderRadius: 215 },
-  ringOuter: { position: 'absolute', width: 360, height: 360, borderRadius: 180, borderWidth: 2 },
-  ringInner: { position: 'absolute', width: 250, height: 250, borderRadius: 125, borderWidth: 2 },
-  floating: { position: 'absolute', width: 48, height: 48, marginLeft: -24, marginTop: -24, borderRadius: 24, borderWidth: 1, alignItems: 'center', justifyContent: 'center', elevation: 4, shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 } },
-  logoStage: { alignItems: 'center', justifyContent: 'center' },
-  logoCard: { width: 180, height: 180, borderRadius: 42, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', elevation: 10, shadowOpacity: 0.20, shadowRadius: 24, shadowOffset: { width: 0, height: 10 } },
-  logo: { width: 150, height: 150 },
-  title: { marginTop: 26, fontSize: 35, lineHeight: 42, fontWeight: '800', letterSpacing: -0.9 },
-  subtitle: { marginTop: 7, fontSize: 16, lineHeight: 21, fontWeight: '500' },
-  progressTrack: { height: 7, marginTop: 26, borderRadius: 4, overflow: 'hidden', backgroundColor: 'rgba(105,154,184,0.18)' },
-  progressFill: { height: '100%', borderRadius: 4 },
-  footer: { position: 'absolute', bottom: 52, fontSize: 12, fontWeight: '700', letterSpacing: 1.15 },
+  root: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    zIndex: 9999,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+
+  content: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  centerGlow: {
+    position: 'absolute',
+    width: 330,
+    height: 330,
+    borderRadius: 165,
+  },
+
+  ringOuter: {
+    position: 'absolute',
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    borderWidth: 1.5,
+  },
+
+  ringInner: {
+    position: 'absolute',
+    width: 242,
+    height: 242,
+    borderRadius: 121,
+    borderWidth: 1.2,
+    borderStyle: 'dashed',
+  },
+
+  floatingIcon: {
+    position: 'absolute',
+    width: 46,
+    height: 46,
+    marginLeft: -23,
+    marginTop: -23,
+    borderRadius: 14,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  logoWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  logoCard: {
+    width: 158,
+    height: 158,
+    borderRadius: 40,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  logo: {
+    width: 138,
+    height: 138,
+  },
+
+  title: {
+    marginTop: 23,
+    fontSize: 35,
+    lineHeight: 42,
+    fontWeight: '800',
+    letterSpacing: -0.9,
+  },
+
+  tagline: {
+    marginTop: 7,
+    fontSize: 15.5,
+    lineHeight: 21,
+    fontWeight: '600',
+    letterSpacing: 0.1,
+  },
+
+  pulseAccent: {
+    width: 102,
+    height: 20,
+    marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  pulseLine: {
+    width: 31,
+    height: 2,
+    transform: [{ rotate: '-27deg' }],
+  },
+
+  pulseLineRight: {
+    transform: [{ rotate: '27deg' }],
+  },
+
+  pulsePoint: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    marginHorizontal: 2,
+  },
+
+  progressTrack: {
+    height: 6,
+    marginTop: 18,
+    borderRadius: 6,
+    overflow: 'hidden',
+  },
+
+  progressFill: {
+    height: '100%',
+    borderRadius: 6,
+  },
+
+  shimmer: {
+    position: 'absolute',
+    top: 0,
+    width: 42,
+    height: '100%',
+    borderRadius: 6,
+    backgroundColor: 'rgba(255,255,255,0.58)',
+    transform: [{ skewX: '-16deg' }],
+  },
+
+  statusText: {
+    marginTop: 9,
+    fontSize: 12.5,
+    lineHeight: 18,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+
+  footer: {
+    position: 'absolute',
+    bottom: 42,
+    fontSize: 11.5,
+    fontWeight: '700',
+    letterSpacing: 1.05,
+  },
 });

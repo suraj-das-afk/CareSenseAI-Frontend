@@ -22,12 +22,18 @@ import {
   RefreshControl,
 } from 'react-native';
 
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useFocusEffect } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 
 import { AuthContext } from '../context/AuthContext';
+import { getInAppNotifications } from '../services/notificationService';
 import { getDashboard } from '../services/api';
+import api from '../services/api';
 
 /* ============================================================
    COLORS & THEME
@@ -382,6 +388,115 @@ const ActionCard = memo(
   },
 );
 
+
+/* ============================================================
+   APPOINTMENT DATE/TIME HELPERS
+   Use the raw ISO appointment datetime from the appointments
+   endpoint and let JavaScript convert it to the device's local
+   timezone. This prevents UTC strings such as 06:00Z from being
+   displayed as 6:00 AM when the user's local time is 11:30 AM.
+============================================================ */
+
+const parseHomeAppointmentDate = value => {
+  if (!value) {
+    return null;
+  }
+
+  const parsed =
+    value instanceof Date
+      ? new Date(value.getTime())
+      : new Date(value);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+
+  return parsed;
+};
+
+const getHomeLocalDateKey = date => {
+  if (!date) {
+    return '';
+  }
+
+  return [
+    date.getFullYear(),
+    String(date.getMonth() + 1).padStart(2, '0'),
+    String(date.getDate()).padStart(2, '0'),
+  ].join('-');
+};
+
+const formatHomeAppointmentTime = date => {
+  if (!date) {
+    return 'Time unavailable';
+  }
+
+  return date.toLocaleTimeString([], {
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+};
+
+const formatHomeAppointmentDate = date => {
+  if (!date) {
+    return 'Date unavailable';
+  }
+
+  return date.toLocaleDateString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+};
+
+const normalizeHomeAppointment = item => {
+  const appointmentDate =
+    parseHomeAppointmentDate(
+      item?.appointment_date ||
+        item?.appointmentDate ||
+        item?.date,
+    );
+
+  if (!appointmentDate) {
+    return null;
+  }
+
+  const status =
+    String(item?.status || '')
+      .trim()
+      .toUpperCase();
+
+  return {
+    id:
+      item?.id ??
+      item?._id ??
+      null,
+    appointmentDate,
+    status,
+    doctorName:
+      item?.doctor_name ||
+      item?.doctorName ||
+      'Healthcare Provider',
+  };
+};
+
+const isActiveHomeAppointment = appointment => {
+  if (!appointment?.appointmentDate) {
+    return false;
+  }
+
+  return [
+    'SCHEDULED',
+    'UPCOMING',
+    'CONFIRMED',
+    'PENDING',
+  ].includes(
+    String(
+      appointment.status || '',
+    ).toUpperCase(),
+  );
+};
+
 /* ============================================================
    HOME SCREEN
 ============================================================ */
@@ -395,6 +510,9 @@ export default function HomeScreen({ navigation }) {
 
   const isDark = useColorScheme() === 'dark';
   const { width } = useWindowDimensions();
+
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = useBottomTabBarHeight();
   const theme = useMemo(
     () => getTheme(isDark),
     [isDark],
@@ -402,6 +520,9 @@ export default function HomeScreen({ navigation }) {
 
   const [avatarImageFailed, setAvatarImageFailed] =
     useState(false);
+
+  const [notificationUnreadCount, setNotificationUnreadCount] =
+    useState(0);
 
   const fadeAnim = useRef(
     new Animated.Value(0),
@@ -623,21 +744,186 @@ export default function HomeScreen({ navigation }) {
                 : [],
             );
 
-            setTodaysSchedule(
+            const dashboardSchedule =
               Array.isArray(
                 data?.today_schedule ||
                   data?.schedule,
               )
                 ? data.today_schedule ||
                     data.schedule
-                : [],
-            );
+                : [];
 
-            setUpcomingConsult(
-              data?.upcoming_consult ||
-                data?.upcomingConsult ||
-                null,
-            );
+            /*
+             * Do not use the dashboard's preformatted appointment
+             * time here. The appointments screen already uses the
+             * raw appointment datetime and localizes it correctly.
+             *
+             * Example:
+             *   06:00Z === 11:30 AM in UTC+05:30.
+             *
+             * Home now uses the same raw appointments API and the
+             * same local Date conversion, so both screens show the
+             * same time.
+             */
+            try {
+              const appointmentResponse =
+                await api.get(
+                  'appointments/',
+                  {
+                    timeout: 10000,
+                  },
+                );
+
+              const appointmentPayload =
+                appointmentResponse?.data;
+
+              const rawAppointments =
+                Array.isArray(
+                  appointmentPayload,
+                )
+                  ? appointmentPayload
+                  : Array.isArray(
+                      appointmentPayload?.results,
+                    )
+                    ? appointmentPayload.results
+                    : Array.isArray(
+                        appointmentPayload?.appointments,
+                      )
+                      ? appointmentPayload.appointments
+                      : [];
+
+              const appointments =
+                rawAppointments
+                  .map(
+                    normalizeHomeAppointment,
+                  )
+                  .filter(Boolean)
+                  .filter(
+                    isActiveHomeAppointment,
+                  );
+
+              const now = Date.now();
+
+              const upcomingAppointments =
+                appointments
+                  .filter(
+                    appointment =>
+                      appointment
+                        .appointmentDate
+                        .getTime() >= now,
+                  )
+                  .sort(
+                    (a, b) =>
+                      a.appointmentDate.getTime() -
+                      b.appointmentDate.getTime(),
+                  );
+
+              const nextAppointment =
+                upcomingAppointments[0] ||
+                null;
+
+              if (nextAppointment) {
+                setUpcomingConsult({
+                  doctor:
+                    nextAppointment.doctorName,
+                  specialty:
+                    'Scheduled appointment',
+                  date:
+                    formatHomeAppointmentDate(
+                      nextAppointment.appointmentDate,
+                    ),
+                  time:
+                    formatHomeAppointmentTime(
+                      nextAppointment.appointmentDate,
+                    ),
+                  status:
+                    nextAppointment.status,
+                });
+              } else {
+                setUpcomingConsult(null);
+              }
+
+              const todayKey =
+                getHomeLocalDateKey(
+                  new Date(),
+                );
+
+              const todayAppointments =
+                appointments
+                  .filter(
+                    appointment =>
+                      getHomeLocalDateKey(
+                        appointment.appointmentDate,
+                      ) === todayKey,
+                  )
+                  .sort(
+                    (a, b) =>
+                      a.appointmentDate.getTime() -
+                      b.appointmentDate.getTime(),
+                  );
+
+              const appointmentSchedule =
+                todayAppointments.map(
+                  appointment => ({
+                    kind: 'appointment',
+                    id:
+                      appointment.id ||
+                      `${appointment.doctorName}-${appointment.appointmentDate.getTime()}`,
+                    name:
+                      appointment.doctorName,
+                    subtitle:
+                      'Scheduled appointment',
+                    time:
+                      formatHomeAppointmentTime(
+                        appointment.appointmentDate,
+                      ),
+                    status:
+                      appointment.status,
+                  }),
+                );
+
+              const nonAppointmentSchedule =
+                dashboardSchedule.filter(
+                  item =>
+                    String(
+                      item?.kind ||
+                        item?.type ||
+                        '',
+                    ).toLowerCase() !==
+                      'appointment',
+                );
+
+              setTodaysSchedule([
+                ...nonAppointmentSchedule,
+                ...appointmentSchedule,
+              ]);
+            } catch (appointmentError) {
+              if (__DEV__) {
+                console.warn(
+                  'Home appointments fetch error:',
+                  appointmentError?.message ||
+                    'Request failed.',
+                );
+              }
+
+              /*
+               * Never fall back to the dashboard's preformatted
+               * appointment time because that value may be UTC.
+               */
+              setUpcomingConsult(null);
+
+              setTodaysSchedule(
+                dashboardSchedule.filter(
+                  item =>
+                    String(
+                      item?.kind ||
+                        item?.type ||
+                        '',
+                    ).toLowerCase() !==
+                      'appointment',
+                ),
+              );
+            }
 
             setCareSenseScore(
               typeof data?.score === 'number'
@@ -726,9 +1012,28 @@ export default function HomeScreen({ navigation }) {
     void fetchDashboardData(true);
   }, [fetchDashboardData]);
 
+  const refreshNotificationCount = useCallback(async () => {
+    try {
+      const items = await getInAppNotifications();
+      const unread = Array.isArray(items)
+        ? items.filter(item => !item?.read).length
+        : 0;
+
+      setNotificationUnreadCount(unread);
+    } catch (error) {
+      if (__DEV__) {
+        console.warn(
+          'Unable to load notification count:',
+          error?.message || error,
+        );
+      }
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       void fetchDashboardData();
+      void refreshNotificationCount();
 
       fadeAnim.setValue(0);
       slideAnim.setValue(15);
@@ -758,6 +1063,7 @@ export default function HomeScreen({ navigation }) {
       return () => animation.stop();
     }, [
       fetchDashboardData,
+      refreshNotificationCount,
       fadeAnim,
       slideAnim,
     ]),
@@ -815,7 +1121,10 @@ export default function HomeScreen({ navigation }) {
         contentContainerStyle={[
           styles.content,
           {
-            paddingBottom: 130,
+            paddingBottom:
+              tabBarHeight +
+              insets.bottom +
+              36,
           },
         ]}
         showsVerticalScrollIndicator={false}
@@ -893,17 +1202,70 @@ export default function HomeScreen({ navigation }) {
             </View>
           </View>
 
-          <View
-            style={[
-              styles.avatarCircle,
-              {
-                backgroundColor:
-                  theme.card,
-                borderColor:
-                  theme.border,
-              },
-            ]}
-          >
+          <View style={styles.headerActions}>
+            <TouchableOpacity
+              activeOpacity={0.78}
+              onPress={() =>
+                navigation.navigate(
+                  'NotificationCenter',
+                )
+              }
+              style={[
+                styles.headerNotificationButton,
+                {
+                  backgroundColor:
+                    theme.card,
+                  borderColor:
+                    theme.border,
+                },
+              ]}
+            >
+              <Ionicons
+                name={
+                  notificationUnreadCount > 0
+                    ? 'notifications'
+                    : 'notifications-outline'
+                }
+                size={21}
+                color={theme.textPrimary}
+              />
+
+              {notificationUnreadCount > 0 ? (
+                <View
+                  style={[
+                    styles.notificationBadge,
+                    {
+                      backgroundColor:
+                        theme.cyanAccent,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={
+                      styles.notificationBadgeText
+                    }
+                  >
+                    {notificationUnreadCount > 9
+                      ? '9+'
+                      : String(
+                          notificationUnreadCount,
+                        )}
+                  </Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+
+            <View
+              style={[
+                styles.avatarCircle,
+                {
+                  backgroundColor:
+                    theme.card,
+                  borderColor:
+                    theme.border,
+                },
+              ]}
+            >
             {profilePhoto &&
             !avatarImageFailed ? (
               <Image
@@ -932,6 +1294,7 @@ export default function HomeScreen({ navigation }) {
                 {avatarLetter}
               </Text>
             )}
+            </View>
           </View>
         </View>
 
@@ -1065,7 +1428,7 @@ export default function HomeScreen({ navigation }) {
                     styles.infoPillText,
                     {
                       color:
-                        theme.textSecondary,
+                        theme.textSecondary
                     },
                   ]}
                 >
@@ -2295,6 +2658,41 @@ const styles = StyleSheet.create({
     paddingRight: 12,
   },
 
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  headerNotificationButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    marginRight: 8,
+    position: 'relative',
+  },
+
+  notificationBadge: {
+    position: 'absolute',
+    top: -2,
+    right: -1,
+    minWidth: 17,
+    height: 17,
+    paddingHorizontal: 4,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  notificationBadgeText: {
+    fontSize: 9,
+    lineHeight: 11,
+    fontWeight: '900',
+    color: '#06201D',
+  },
+
   greeting: {
     fontSize: 22,
     fontWeight: '800',
@@ -2556,10 +2954,10 @@ const styles = StyleSheet.create({
   },
 
   actionGrid: {
-  flexDirection: 'row',
-  flexWrap: 'wrap',
-  gap: 12,
-  marginBottom: 24,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 24,
   },
 
   actionCard: {

@@ -134,6 +134,11 @@ const getLoginErrorMessage = error => {
     case 'auth/invalid-email':
       return 'Please enter a valid email address.';
 
+    case 'auth/email-not-verified':
+      return error?.verificationEmailSent
+        ? 'Your email is not verified yet. We sent a new verification email. Verify it, then log in again.'
+        : 'Your email is not verified yet. Please verify it before signing in.';
+
     case 'auth/too-many-requests':
       return 'Too many sign-in attempts. Please wait and try again later.';
 

@@ -1,213 +1,745 @@
-import React, { useMemo, useState } from 'react';
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+
 import {
-  View,
-  Text,
-  StyleSheet,
-  ScrollView,
-  TouchableOpacity,
-  Alert,
+  Animated,
   Linking,
-  useColorScheme,
+  Pressable,
+  ScrollView,
   StatusBar,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
+
 import Ionicons from '@expo/vector-icons/Ionicons';
+
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
+
+import { AuthContext } from '../context/AuthContext';
+import { PopupContext } from '../context/PopupContext';
 import { openPDFReport } from '../services/api';
 
-export default function HealthRecordDetail({ route, navigation }) {
-  const { result } = route.params;
 
-  const [saved, setSaved] = useState(false);
-  const [understoodUrgency, setUnderstoodUrgency] = useState(false);
-  const [showMoreDetails, setShowMoreDetails] = useState(false);
+/* ============================================================
+   CONSTANTS
+============================================================ */
 
-  const systemScheme = useColorScheme();
-  const isDark = systemScheme === 'dark';
+const EMERGENCY_NUMBER = '112';
 
-  /* -----------------------------------------------------------
-     RESULT STATE
-  ----------------------------------------------------------- */
 
-  const isEmergency = result.triage_level === 'EMERGENCY';
-  const isUrgent = result.triage_level === 'URGENT';
-  const isRoutine = result.triage_level === 'ROUTINE';
+/* ============================================================
+   HELPERS
+============================================================ */
 
-  const isInsufficient = result.needs_clarification === true;
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
 
-  const significantDiseases = (result.top_diseases || [])
-    .filter((d) => Number(d.confidence || 0) >= 5)
-    .slice(0, 3);
 
-  const differentials = (result.differentials || []).slice(0, 2);
-  const warnings = result.warnings || [];
-  const uncertainty = result.uncertainty || {};
-  const medicines = result.medicines || [];
-  const interactions = result.drug_interactions || [];
+function asObject(value) {
+  return value &&
+    typeof value === 'object' &&
+    !Array.isArray(value)
+    ? value
+    : {};
+}
 
-  const auditId = result.audit_id || result.id || null;
 
-  const hasExtraDetails =
-    medicines.length > 0 ||
-    interactions.length > 0 ||
-    Boolean(result.fda_warning) ||
-    warnings.length > 0;
+function humanizeText(value) {
+  if (
+    value === null ||
+    value === undefined
+  ) {
+    return '';
+  }
 
-  /* -----------------------------------------------------------
-     COLORS
-  ----------------------------------------------------------- */
+  return String(value)
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(
+      /\b\w/g,
+      char => char.toUpperCase()
+    );
+}
+
+
+function formatConfidence(value) {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return '—';
+  }
+
+  const safe = Math.max(
+    0,
+    Math.min(100, numeric)
+  );
+
+  return Number.isInteger(safe)
+    ? `${safe}%`
+    : `${safe.toFixed(1)}%`;
+}
+
+
+function clampPercentage(value) {
+  const numeric = Number(value);
+
+  if (!Number.isFinite(numeric)) {
+    return 0;
+  }
+
+  return Math.max(
+    0,
+    Math.min(100, numeric)
+  );
+}
+
+
+function getConditionDescription(
+  condition
+) {
+  const normalized = String(
+    condition || ''
+  ).toLowerCase();
+
+  if (
+    normalized.includes(
+      'myocardial'
+    ) ||
+    normalized.includes(
+      'heart attack'
+    )
+  ) {
+    return 'A possible heart-related condition';
+  }
+
+  if (
+    normalized.includes(
+      'chikungunya'
+    )
+  ) {
+    return 'A possible mosquito-borne viral illness';
+  }
+
+  if (
+    normalized.includes(
+      'dengue'
+    )
+  ) {
+    return 'A possible mosquito-borne viral illness';
+  }
+
+  if (
+    normalized.includes(
+      'malaria'
+    )
+  ) {
+    return 'A possible mosquito-borne infection';
+  }
+
+  if (
+    normalized.includes(
+      'influenza'
+    ) ||
+    normalized === 'flu'
+  ) {
+    return 'A possible viral respiratory illness';
+  }
+
+  if (
+    normalized.includes(
+      'covid'
+    )
+  ) {
+    return 'A possible respiratory viral illness';
+  }
+
+  if (
+    normalized.includes(
+      'common cold'
+    )
+  ) {
+    return 'A possible upper respiratory infection pattern';
+  }
+
+  if (
+    normalized.includes(
+      'migraine'
+    )
+  ) {
+    return 'A possible headache pattern';
+  }
+
+  return 'A possible explanation for your symptoms';
+}
+
+
+function getTriagePresentation(
+  triageLevel,
+  colors
+) {
+  const normalized = String(
+    triageLevel || ''
+  ).toUpperCase();
+
+  if (normalized === 'EMERGENCY') {
+    return {
+      key: 'EMERGENCY',
+      eyebrow: 'URGENT ACTION',
+      title: 'Get help right now',
+      description:
+        'The information you entered includes a pattern that may require immediate medical attention. Do not delay professional evaluation.',
+      icon: 'warning-outline',
+      color: colors.danger,
+      soft: colors.dangerSoft,
+      border: colors.dangerBorder,
+      text: colors.dangerText,
+    };
+  }
+
+  if (normalized === 'URGENT') {
+    return {
+      key: 'URGENT',
+      eyebrow: 'MEDICAL ATTENTION',
+      title: 'Get medical help soon',
+      description:
+        'Your symptoms may need timely assessment by a healthcare professional, especially if they worsen or new severe symptoms appear.',
+      icon: 'time-outline',
+      color: colors.warning,
+      soft: colors.warningSoft,
+      border: colors.warningBorder,
+      text: colors.warningText,
+    };
+  }
+
+  return {
+    key: 'ROUTINE',
+    eyebrow: 'ASSESSMENT COMPLETE',
+    title: 'No emergency pattern detected',
+    description:
+      'Based on the information provided, the current assessment does not indicate an emergency pattern. Keep monitoring your symptoms and follow the guidance below.',
+    icon: 'checkmark-circle-outline',
+    color: colors.success,
+    soft: colors.successSoft,
+    border: colors.successBorder,
+    text: colors.successText,
+  };
+}
+
+
+/* ============================================================
+   MAIN SCREEN
+============================================================ */
+
+export default function HealthRecordDetail({
+  route,
+  navigation,
+}) {
+  const authContext =
+    useContext(AuthContext) || {};
+
+  const {
+    isDarkMode,
+  } = authContext;
+
+  const {
+    showPopup,
+  } = useContext(
+    PopupContext,
+  ) || {};
+
+  const isDark = Boolean(
+    isDarkMode
+  );
+
+  const insets =
+    useSafeAreaInsets();
+
+  const result =
+    route?.params?.result || {};
+
+  /* ==========================================================
+     THEME
+  ========================================================== */
 
   const colors = useMemo(
     () => ({
-      background: isDark ? '#090909' : '#FFFFFF',
-      card: isDark ? '#171717' : '#FFFFFF',
-      cardAlt: isDark ? '#202020' : '#F8F8F8',
+      background: isDark
+        ? '#0A0F1A'
+        : '#F7F9FC',
 
-      text: isDark ? '#F5F5F5' : '#111111',
-      secondary: isDark ? '#A3A3A3' : '#555555',
-      muted: isDark ? '#737373' : '#777777',
+      surface: isDark
+        ? '#101722'
+        : '#FFFFFF',
 
-      border: isDark ? '#333333' : '#E8E8E8',
+      card: isDark
+        ? '#141C29'
+        : '#FFFFFF',
 
-      iconBg: isDark ? '#292929' : '#F5F5F5',
+      cardAlt: isDark
+        ? '#111827'
+        : '#F8FAFC',
 
-      danger: '#EF0011',
-      dangerSoft: isDark ? '#351719' : '#FFE7E8',
-      dangerText: isDark ? '#FF6B72' : '#D9000F',
+      input: isDark
+        ? '#0F1722'
+        : '#FFFFFF',
+
+      border: isDark
+        ? '#243044'
+        : '#E2E8F0',
+
+      borderSoft: isDark
+        ? '#1B2636'
+        : '#EEF2F7',
+
+      text: isDark
+        ? '#F8FAFC'
+        : '#111827',
+
+      secondary: isDark
+        ? '#94A3B8'
+        : '#64748B',
+
+      muted: isDark
+        ? '#64748B'
+        : '#94A3B8',
+
+      accent: '#00D4C5',
+
+      accentSoft: isDark
+        ? '#0E282D'
+        : '#E8FBF8',
+
+      accentBorder: isDark
+        ? '#1B4746'
+        : '#B8EEE8',
+
+      accentText: isDark
+        ? '#8FF7ED'
+        : '#007F77',
+
+      danger: '#EF4444',
+
+      dangerSoft: isDark
+        ? '#32171C'
+        : '#FFF1F2',
+
+      dangerBorder: isDark
+        ? '#642A31'
+        : '#FECDD3',
+
+      dangerText: isDark
+        ? '#FDA4AF'
+        : '#BE123C',
 
       warning: '#F59E0B',
-      warningSoft: isDark ? '#302512' : '#FFF5D8',
+
+      warningSoft: isDark
+        ? '#30240F'
+        : '#FFFBEB',
+
+      warningBorder: isDark
+        ? '#604817'
+        : '#FDE68A',
+
+      warningText: isDark
+        ? '#FCD34D'
+        : '#B45309',
 
       success: '#00A878',
-      successSoft: isDark ? '#10352B' : '#E3F8F1',
 
-      primary: '#2563EB',
+      successSoft: isDark
+        ? '#10352B'
+        : '#E8F8F3',
+
+      successBorder: isDark
+        ? '#246A58'
+        : '#BCEBDD',
+
+      successText: isDark
+        ? '#7DE3C8'
+        : '#087F68',
+
+      shadow: isDark
+        ? '#000000'
+        : '#64748B',
     }),
     [isDark]
   );
 
-  /* -----------------------------------------------------------
-     TRIAGE TEXT
-  ----------------------------------------------------------- */
 
-  const triageLabel = isEmergency
-    ? 'EMERGENCY'
-    : isUrgent
-      ? 'URGENT'
-      : 'ROUTINE';
+  /* ==========================================================
+     RESULT DATA
+  ========================================================== */
 
-  const triageTitle = isEmergency
-    ? 'Get help right now'
-    : isUrgent
-      ? 'Get medical help soon'
-      : 'You can monitor this';
+  const triageLevel = String(
+    result?.triage_level || 'ROUTINE'
+  ).toUpperCase();
 
-  const triageDescription = isEmergency
-    ? 'Your symptoms may be serious. Please do not wait at home. Go to an emergency department or call for emergency help immediately.'
-    : isUrgent
-      ? 'Your symptoms may need medical attention soon. Please contact a healthcare professional and do not ignore worsening symptoms.'
-      : 'Your symptoms do not currently show an emergency pattern. Follow the advice below and watch for any changes.';
-
-  /* -----------------------------------------------------------
-     SAVE
-  ----------------------------------------------------------- */
-
-  const handleSave = () => {
-    setSaved(true);
-
-    Alert.alert(
-      'Saved',
-      'This assessment is already stored in your health records.'
+  const triage =
+    getTriagePresentation(
+      triageLevel,
+      colors
     );
-  };
 
-  /* -----------------------------------------------------------
-     PDF
-  ----------------------------------------------------------- */
+  const isEmergency =
+    triage.key === 'EMERGENCY';
 
-  const handleDownloadPDF = async () => {
-    if (!auditId && !result.id) {
-      Alert.alert(
-        'Report unavailable',
-        'This assessment does not have a record ID yet.'
+  const isUrgent =
+    triage.key === 'URGENT';
+
+  const isRoutine =
+    triage.key === 'ROUTINE';
+
+  const isInsufficient =
+    result?.needs_clarification === true;
+
+  const topDiseases =
+    asArray(result?.top_diseases);
+
+  const significantDiseases =
+    topDiseases
+      .filter(item => {
+        const confidence =
+          Number(
+            item?.confidence || 0
+          );
+
+        return (
+          Number.isFinite(confidence) &&
+          confidence >= 5
+        );
+      })
+      .slice(0, 3);
+
+  const differentials =
+    asArray(result?.differentials)
+      .slice(0, 3);
+
+  const warnings =
+    asArray(result?.warnings);
+
+  const uncertainty =
+    asObject(result?.uncertainty);
+
+  const medicines =
+    asArray(result?.medicines);
+
+  const interactions =
+    asArray(
+      result?.drug_interactions
+    );
+
+  const followUp =
+    asObject(result?.follow_up);
+
+  const auditId =
+    result?.audit_id ||
+    result?.id ||
+    null;
+
+  const missingSymptoms =
+    asArray(
+      uncertainty?.missing_symptoms
+    );
+
+  const hasExtraDetails =
+    medicines.length > 0 ||
+    interactions.length > 0 ||
+    Boolean(result?.fda_warning) ||
+    warnings.length > 0;
+
+  const hasFollowUp =
+    Object.keys(followUp).length >
+    0;
+
+  const aiSummary =
+    result?.ai_summary ||
+    result?.explanation ||
+    '';
+
+  /* ==========================================================
+     LOCAL STATE
+  ========================================================== */
+
+  const [saved, setSaved] =
+    useState(false);
+
+  const [
+    understoodUrgency,
+    setUnderstoodUrgency,
+  ] = useState(false);
+
+  const [
+    showMoreDetails,
+    setShowMoreDetails,
+  ] = useState(false);
+
+  const [
+    showWhyDetails,
+    setShowWhyDetails,
+  ] = useState(false);
+
+
+  /* ==========================================================
+     SCREEN ANIMATION
+  ========================================================== */
+
+  const fadeAnim =
+    useRef(
+      new Animated.Value(0)
+    ).current;
+
+  const slideAnim =
+    useRef(
+      new Animated.Value(18)
+    ).current;
+
+  useEffect(() => {
+    fadeAnim.setValue(0);
+    slideAnim.setValue(18);
+
+    const animation =
+      Animated.parallel([
+        Animated.timing(
+          fadeAnim,
+          {
+            toValue: 1,
+            duration: 380,
+            useNativeDriver: true,
+          }
+        ),
+        Animated.spring(
+          slideAnim,
+          {
+            toValue: 0,
+            friction: 8,
+            tension: 42,
+            useNativeDriver: true,
+          }
+        ),
+      ]);
+
+    animation.start();
+
+    return () => {
+      animation.stop();
+    };
+  }, [
+    fadeAnim,
+    slideAnim,
+    result?.id,
+    result?.audit_id,
+  ]);
+
+
+  const animatedContentStyle = [
+    styles.scroll,
+    {
+      opacity: fadeAnim,
+      transform: [
+        {
+          translateY: slideAnim,
+        },
+      ],
+    },
+  ];
+
+
+  /* ==========================================================
+     ACTIONS
+  ========================================================== */
+
+  const handleGoBack =
+    useCallback(() => {
+      if (
+        navigation?.canGoBack?.()
+      ) {
+        navigation.goBack();
+      }
+    }, [navigation]);
+
+
+  const handleSave =
+    useCallback(() => {
+      setSaved(true);
+
+      showPopup?.(
+        'Assessment saved',
+        'This assessment is already stored in your CareSense health records.',
+        'success',
       );
-      return;
-    }
+    }, [
+      showPopup,
+    ]);
 
-    try {
-      await openPDFReport(auditId || result.id);
-    } catch (error) {
-      Alert.alert(
-        'Report unavailable',
-        error?.message || 'Unable to download this report right now.'
-      );
-    }
-  };
 
-  /* -----------------------------------------------------------
-     EMERGENCY CALL
-  ----------------------------------------------------------- */
+  const handleDownloadPDF =
+    useCallback(async () => {
+      const recordId =
+        auditId ||
+        result?.id;
 
-  const handleEmergencyCall = async () => {
-    const url = 'tel:112';
+      if (!recordId) {
+        showPopup?.(
+          'Report unavailable',
+          'This assessment does not have a record ID yet.',
+          'warning',
+        );
 
-    try {
-      const supported = await Linking.canOpenURL(url);
+        return;
+      }
 
-      if (supported) {
-        await Linking.openURL(url);
-      } else {
-        Alert.alert(
-          'Emergency help',
-          'Please call your local emergency number immediately.'
+      try {
+        await openPDFReport(
+          recordId,
+        );
+      } catch (error) {
+        console.error(
+          'PDF report error:',
+          error,
+        );
+
+        showPopup?.(
+          'Report unavailable',
+          error?.message ||
+            'Unable to open this report right now. Please try again.',
+          'error',
         );
       }
-    } catch {
-      Alert.alert(
-        'Emergency help',
-        'Please call your local emergency number immediately.'
-      );
-    }
-  };
+    }, [
+      auditId,
+      result?.id,
+      showPopup,
+    ]);
 
-  /* -----------------------------------------------------------
+
+  const handleEmergencyCall =
+    useCallback(async () => {
+      const url =
+        `tel:${EMERGENCY_NUMBER}`;
+
+      try {
+        const supported =
+          await Linking.canOpenURL(
+            url,
+          );
+
+        if (!supported) {
+          showPopup?.(
+            'Emergency help',
+            'Please use your local emergency service number immediately.',
+            'warning',
+          );
+
+          return;
+        }
+
+        await Linking.openURL(
+          url,
+        );
+      } catch (error) {
+        console.error(
+          'Emergency call error:',
+          error,
+        );
+
+        showPopup?.(
+          'Emergency help',
+          'Please call your local emergency service immediately.',
+          'error',
+        );
+      }
+    }, [
+      showPopup,
+    ]);
+
+
+  /* ==========================================================
      NEXT STEPS
-  ----------------------------------------------------------- */
+  ========================================================== */
 
-  const getNextSteps = () => {
+  const nextSteps = useMemo(() => {
     if (isEmergency) {
       return [
-        'Call for emergency help or go to the emergency department now.',
-        'Sit down, stay calm, and do not drive yourself.',
-        'Keep someone nearby until help arrives.',
+        'Contact emergency services or go to the nearest emergency department now.',
+        'Do not drive yourself if you feel severely unwell, faint, confused, or unsafe to travel alone.',
+        'Stay with someone you trust while arranging medical help when possible.',
       ];
     }
 
     if (isUrgent) {
       return [
-        'Contact a doctor or urgent-care service as soon as possible.',
-        'Follow the advice below and avoid activities that make symptoms worse.',
-        'Seek emergency help if severe symptoms suddenly appear.',
+        'Contact a doctor, urgent-care service, or other qualified healthcare professional soon.',
+        'Monitor your symptoms closely and follow any professional advice you receive.',
+        'Seek emergency care immediately if symptoms become severe or a new emergency warning sign appears.',
       ];
     }
 
     return [
-      'Follow the care advice shown in this result.',
-      'Rest, stay hydrated, and keep track of changes in your symptoms when appropriate.',
-      'Contact a doctor if symptoms get worse, persist, or you become concerned.',
+      'Follow the care guidance shown in this result.',
+      'Keep monitoring how your symptoms change over time.',
+      'Contact a healthcare professional if symptoms persist, worsen, or become concerning.',
     ];
-  };
+  }, [
+    isEmergency,
+    isUrgent,
+  ]);
 
-  const nextSteps = getNextSteps();
 
-  /* ===========================================================
+  /* ==========================================================
+     SAFE SCROLL PROPS
+  ========================================================== */
+
+  const scrollContentStyle = [
+    styles.content,
+    {
+      paddingBottom:
+        Math.max(
+          insets.bottom + 42,
+          58
+        ),
+    },
+  ];
+
+
+  /* ==========================================================
      INSUFFICIENT INFORMATION
-  =========================================================== */
+  ========================================================== */
 
   if (isInsufficient) {
     return (
-      <View style={[styles.root, { backgroundColor: colors.background }]}>
+      <SafeAreaView
+        edges={['top']}
+        style={[
+          styles.root,
+          {
+            backgroundColor:
+              colors.background,
+          },
+        ]}
+      >
         <StatusBar
-          barStyle={isDark ? 'light-content' : 'dark-content'}
-          backgroundColor={colors.background}
+          barStyle={
+            isDark
+              ? 'light-content'
+              : 'dark-content'
+          }
+          backgroundColor={
+            colors.background
+          }
+          translucent={false}
         />
 
         <Header
@@ -215,85 +747,145 @@ export default function HealthRecordDetail({ route, navigation }) {
           colors={colors}
         />
 
-        <ScrollView
-          style={styles.scroll}
-          contentContainerStyle={styles.content}
+        <Animated.ScrollView
+          style={animatedContentStyle}
+          contentContainerStyle={
+            scrollContentStyle
+          }
           showsVerticalScrollIndicator={false}
         >
+          {/* HERO */}
           <View
             style={[
-              styles.alertCard,
+              styles.insufficientHero,
               {
-                backgroundColor: isDark ? '#251B35' : '#F4EEFF',
-                borderColor: isDark ? '#5B3A86' : '#D8C5FF',
+                backgroundColor:
+                  isDark
+                    ? '#151529'
+                    : '#F5F3FF',
+
+                borderColor:
+                  isDark
+                    ? '#3C3970'
+                    : '#DDD6FE',
               },
             ]}
           >
-            <View style={styles.resultIconRow}>
+            <View
+              style={
+                styles.heroCenter
+              }
+            >
               <View
                 style={[
-                  styles.resultIcon,
-                  { backgroundColor: '#7C3AED' },
+                  styles.insufficientIcon,
+                  {
+                    backgroundColor:
+                      isDark
+                        ? '#2A2550'
+                        : '#EDE9FE',
+                  },
                 ]}
               >
                 <Ionicons
-                  name="help"
-                  size={30}
-                  color="#FFFFFF"
+                  name="help-circle-outline"
+                  size={34}
+                  color="#7C3AED"
                 />
               </View>
 
-              <View style={styles.heroText}>
+              <View
+                style={[
+                  styles.heroBadge,
+                  {
+                    backgroundColor:
+                      isDark
+                        ? '#30285C'
+                        : '#EDE9FE',
+
+                    borderColor:
+                      isDark
+                        ? '#4A4190'
+                        : '#DDD6FE',
+                  },
+                ]}
+              >
                 <Text
                   style={[
-                    styles.eyebrow,
-                    { color: '#7C3AED' },
+                    styles.heroBadgeText,
+                    {
+                      color: isDark
+                        ? '#C4B5FD'
+                        : '#6D28D9',
+                    },
                   ]}
                 >
                   MORE INFORMATION NEEDED
                 </Text>
-
-                <Text
-                  style={[
-                    styles.heroTitle,
-                    { color: colors.text },
-                  ]}
-                >
-                  We need a little more information
-                </Text>
               </View>
+
+              <Text
+                style={[
+                  styles.insufficientTitle,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                We need a little more information
+              </Text>
+
+              <Text
+                style={[
+                  styles.insufficientDescription,
+                  {
+                    color:
+                      colors.secondary,
+                  },
+                ]}
+              >
+                The information entered is not specific enough
+                to produce a reliable assessment yet. Adding a
+                few more details is safer than guessing.
+              </Text>
             </View>
 
-            <Text
-              style={[
-                styles.heroDescription,
-                { color: colors.secondary },
-              ]}
-            >
-              Your symptoms are not specific enough for CareSense
-              to give you a reliable result. Please add a few more
-              details instead of guessing.
-            </Text>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Add more symptoms"
+              onPress={handleGoBack}
+              style={({ pressed }) => [
+                styles.primaryAction,
+                {
+                  backgroundColor:
+                    colors.accent,
 
-            <TouchableOpacity
-              style={[
-                styles.primaryButton,
-                { backgroundColor: '#7C3AED' },
+                  shadowColor:
+                    colors.accent,
+
+                  opacity: pressed
+                    ? 0.82
+                    : 1,
+                },
               ]}
-              onPress={() => navigation.goBack()}
-              activeOpacity={0.85}
             >
               <Ionicons
                 name="arrow-back"
-                size={21}
-                color="#FFFFFF"
+                size={19}
+                color="#06110F"
               />
 
-              <Text style={styles.primaryButtonText}>
+              <Text
+                style={
+                  styles.primaryActionText
+                }
+              >
                 Add More Symptoms
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
+
 
           <SectionCard
             colors={colors}
@@ -303,58 +895,79 @@ export default function HealthRecordDetail({ route, navigation }) {
             <Text
               style={[
                 styles.bodyText,
-                { color: colors.secondary },
+                {
+                  color:
+                    colors.secondary,
+                },
               ]}
             >
-              {result.ai_summary ||
+              {aiSummary ||
                 'The information entered was too general to confidently narrow down the possible causes.'}
             </Text>
           </SectionCard>
 
+
           <SectionCard
             colors={colors}
-            icon="information-circle-outline"
-            title="How to get a better result"
+            icon="bulb-outline"
+            title="How to improve the assessment"
           >
-            <Bullet
+            <InfoBullet
+              colors={colors}
               text="Tell us when the symptom started."
-              colors={colors}
             />
 
-            <Bullet
+            <InfoBullet
+              colors={colors}
               text="Describe how severe it feels."
-              colors={colors}
             />
 
-            <Bullet
-              text="Add other symptoms you are having."
+            <InfoBullet
               colors={colors}
+              text="Add other symptoms you are experiencing."
             />
 
-            <Bullet
+            <InfoBullet
+              colors={colors}
               text="Mention anything that makes the symptom better or worse."
-              colors={colors}
             />
           </SectionCard>
-        </ScrollView>
-      </View>
+
+
+          <SafetyNotice
+            colors={colors}
+          />
+        </Animated.ScrollView>
+      </SafeAreaView>
     );
   }
 
-  /* ===========================================================
+
+  /* ==========================================================
      NORMAL RESULT
-  =========================================================== */
+  ========================================================== */
 
   return (
-    <View
+    <SafeAreaView
+      edges={['top']}
       style={[
         styles.root,
-        { backgroundColor: colors.background },
+        {
+          backgroundColor:
+            colors.background,
+        },
       ]}
     >
       <StatusBar
-        barStyle={isDark ? 'light-content' : 'dark-content'}
-        backgroundColor={colors.background}
+        barStyle={
+          isDark
+            ? 'light-content'
+            : 'dark-content'
+        }
+        backgroundColor={
+          colors.background
+        }
+        translucent={false}
       />
 
       <Header
@@ -362,104 +975,123 @@ export default function HealthRecordDetail({ route, navigation }) {
         colors={colors}
       />
 
-      <ScrollView
-        style={styles.scroll}
-        contentContainerStyle={styles.content}
+      <Animated.ScrollView
+        style={animatedContentStyle}
+        contentContainerStyle={
+          scrollContentStyle
+        }
         showsVerticalScrollIndicator={false}
       >
-        {/* =====================================================
-            1. MAIN RESULT
-        ===================================================== */}
+        {/* ==================================================
+            HERO / TRIAGE
+        ================================================== */}
 
         <View
           style={[
-            styles.alertCard,
+            styles.triageHero,
             {
-              backgroundColor: isEmergency
-                ? colors.dangerSoft
-                : isUrgent
-                  ? colors.warningSoft
-                  : colors.successSoft,
+              backgroundColor:
+                triage.soft,
 
-              borderColor: isEmergency
-                ? '#FF9B9F'
-                : isUrgent
-                  ? '#F4C96B'
-                  : '#7AD8BF',
+              borderColor:
+                triage.border,
             },
           ]}
         >
-          <View style={styles.resultIconRow}>
+          <View
+            style={styles.triageHeroTop}
+          >
             <View
               style={[
-                styles.resultIcon,
+                styles.triageIcon,
                 {
-                  backgroundColor: isEmergency
-                    ? colors.danger
-                    : isUrgent
-                      ? colors.warning
-                      : colors.success,
+                  backgroundColor:
+                    triage.color,
                 },
               ]}
             >
               <Ionicons
-                name={
-                  isEmergency
-                    ? 'warning-outline'
-                    : isUrgent
-                      ? 'time-outline'
-                      : 'checkmark'
-                }
+                name={triage.icon}
                 size={31}
                 color="#FFFFFF"
               />
             </View>
 
-            <View style={styles.heroText}>
-              <Text
+            <View
+              style={
+                styles.triageHeroCopy
+              }
+            >
+              <View
                 style={[
-                  styles.eyebrow,
+                  styles.triageBadge,
                   {
-                    color: isEmergency
-                      ? colors.dangerText
-                      : isUrgent
-                        ? '#B36B00'
-                        : '#008466',
+                    backgroundColor:
+                      triage.color,
                   },
                 ]}
               >
-                {triageLabel}
-              </Text>
+                <Text
+                  style={
+                    styles.triageBadgeText
+                  }
+                >
+                  {triage.key}
+                </Text>
+              </View>
 
               <Text
                 style={[
-                  styles.heroTitle,
-                  { color: colors.text },
+                  styles.triageTitle,
+                  {
+                    color:
+                      colors.text,
+                  },
                 ]}
               >
-                {triageTitle}
+                {triage.title}
               </Text>
             </View>
           </View>
 
           <Text
             style={[
-              styles.heroDescription,
-              { color: colors.secondary },
+              styles.triageDescription,
+              {
+                color:
+                  colors.secondary,
+              },
             ]}
           >
-            {triageDescription}
+            {triage.description}
           </Text>
 
+
+          {/* EMERGENCY ACTIONS */}
+
           {isEmergency && (
-            <>
-              <TouchableOpacity
-                style={[
+            <View
+              style={
+                styles.emergencyActions
+              }
+            >
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Call emergency services"
+                onPress={
+                  handleEmergencyCall
+                }
+                style={({ pressed }) => [
                   styles.emergencyButton,
-                  { backgroundColor: colors.danger },
+                  {
+                    backgroundColor:
+                      colors.danger,
+
+                    opacity: pressed
+                      ? 0.84
+                      : 1,
+                  },
                 ]}
-                onPress={handleEmergencyCall}
-                activeOpacity={0.85}
               >
                 <Ionicons
                   name="call-outline"
@@ -467,35 +1099,73 @@ export default function HealthRecordDetail({ route, navigation }) {
                   color="#FFFFFF"
                 />
 
-                <Text style={styles.emergencyButtonText}>
-                  Call Emergency (112)
-                </Text>
-              </TouchableOpacity>
+                <View
+                  style={
+                    styles.emergencyButtonCopy
+                  }
+                >
+                  <Text
+                    style={
+                      styles.emergencyButtonTitle
+                    }
+                  >
+                    Call Emergency
+                  </Text>
 
-              <TouchableOpacity
-                style={[
-                  styles.understandButton,
-                  {
-                    backgroundColor: isDark
-                      ? '#241011'
-                      : '#FFF9F9',
-                    borderColor: colors.border,
-                  },
-                ]}
+                  <Text
+                    style={
+                      styles.emergencyButtonSubtitle
+                    }
+                  >
+                    Tap to call {EMERGENCY_NUMBER}
+                  </Text>
+                </View>
+
+                <Ionicons
+                  name="arrow-forward"
+                  size={18}
+                  color="#FFFFFF"
+                />
+              </Pressable>
+
+
+              <Pressable
+                accessibilityRole="checkbox"
+                accessibilityState={{
+                  checked:
+                    understoodUrgency,
+                }}
                 onPress={() =>
                   setUnderstoodUrgency(
-                    (value) => !value
+                    value => !value
                   )
                 }
-                activeOpacity={0.85}
+                style={({ pressed }) => [
+                  styles.understandButton,
+                  {
+                    backgroundColor:
+                      colors.card,
+
+                    borderColor:
+                      understoodUrgency
+                        ? colors.danger
+                        : colors.border,
+
+                    opacity:
+                      pressed
+                        ? 0.82
+                        : 1,
+                  },
+                ]}
               >
                 <View
                   style={[
                     styles.checkbox,
                     {
-                      borderColor: understoodUrgency
-                        ? colors.danger
-                        : colors.border,
+                      borderColor:
+                        understoodUrgency
+                          ? colors.danger
+                          : colors.border,
 
                       backgroundColor:
                         understoodUrgency
@@ -507,7 +1177,7 @@ export default function HealthRecordDetail({ route, navigation }) {
                   {understoodUrgency && (
                     <Ionicons
                       name="checkmark"
-                      size={17}
+                      size={16}
                       color="#FFFFFF"
                     />
                   )}
@@ -516,240 +1186,411 @@ export default function HealthRecordDetail({ route, navigation }) {
                 <Text
                   style={[
                     styles.understandText,
-                    { color: colors.text },
+                    {
+                      color:
+                        colors.text,
+                    },
                   ]}
                 >
-                  I understand this is an emergency
+                  I understand this may require
+                  immediate medical attention.
                 </Text>
-              </TouchableOpacity>
-            </>
+              </Pressable>
+            </View>
           )}
         </View>
 
-        {/* =====================================================
-            2. WHAT WE FOUND
-        ===================================================== */}
 
-        {significantDiseases.length > 0 && (
+        {/* ==================================================
+            POSSIBLE CONDITIONS
+        ================================================== */}
+
+        {significantDiseases.length >
+          0 && (
           <SectionCard
             colors={colors}
-            icon="medical-outline"
-            title="What we found"
-            subtitle={`${significantDiseases.length} possible condition${
-              significantDiseases.length === 1
-                ? ''
-                : 's'
-            }, most likely first`}
+            icon="analytics-outline"
+            title="Possible conditions"
+            subtitle="These are possibilities generated from the information you provided — not diagnoses."
           >
             {significantDiseases.map(
               (disease, index) => (
                 <ConditionItem
-                  key={`${disease.condition}-${index}`}
+                  key={`${String(
+                    disease?.condition ||
+                      'condition'
+                  )}-${index}`}
                   disease={disease}
                   index={index}
                   colors={colors}
                   isDark={isDark}
-                  primary={index === 0}
+                  primary={
+                    index === 0
+                  }
                 />
               )
             )}
           </SectionCard>
         )}
 
-        {/* =====================================================
-            3. WHAT THIS MEANS
-        ===================================================== */}
+
+        {/* ==================================================
+            SUMMARY
+        ================================================== */}
 
         <SectionCard
           colors={colors}
           icon="chatbubble-ellipses-outline"
           title="What this means"
+          subtitle="A plain-language summary of your assessment."
         >
-          <Text
-            style={[
-              styles.bodyText,
-              { color: colors.secondary },
-            ]}
-          >
-            {result.ai_summary ||
-              result.explanation ||
-              'The result is based on the symptoms you entered and the clinical rules used by CareSense.'}
-          </Text>
+          {aiSummary ? (
+            <Text
+              style={[
+                styles.bodyText,
+                {
+                  color:
+                    colors.secondary,
+                },
+              ]}
+            >
+              {aiSummary}
+            </Text>
+          ) : (
+            <EmptyInlineMessage
+              colors={colors}
+              text="No additional summary was returned for this assessment."
+            />
+          )}
 
           <View
             style={[
               styles.infoBox,
               {
-                backgroundColor: colors.cardAlt,
-                borderColor: colors.border,
+                backgroundColor:
+                  colors.accentSoft,
+
+                borderColor:
+                  colors.accentBorder,
               },
             ]}
           >
             <Ionicons
-              name="information-circle-outline"
-              size={22}
-              color={colors.muted}
+              name="shield-checkmark-outline"
+              size={20}
+              color={colors.accent}
             />
 
             <Text
               style={[
                 styles.infoText,
-                { color: colors.muted },
+                {
+                  color:
+                    colors.secondary,
+                },
               ]}
             >
-              This app helps you understand your
-              symptoms. It does not replace advice from
-              a qualified doctor.
+              CareSense AI is a decision-support tool.
+              It does not replace a qualified healthcare
+              professional or provide a diagnosis.
             </Text>
           </View>
         </SectionCard>
 
-        {/* =====================================================
-            4. WHY WE THINK SO
-        ===================================================== */}
 
-        {(differentials.length > 0 ||
-          uncertainty.missing_symptoms?.length > 0) && (
+        {/* ==================================================
+            WHY THIS RESULT
+        ================================================== */}
+
+        {(differentials.length >
+          0 ||
+          missingSymptoms.length >
+            0) && (
           <SectionCard
             colors={colors}
-            icon="clipboard-outline"
-            title="Why we think so"
+            icon="git-compare-outline"
+            title="Why this result?"
+            subtitle="The assessment compares the symptoms you entered with patterns in the clinical system."
           >
-            {differentials.length > 0 ? (
-              <>
-                {(
-                  differentials[0]?.why || []
-                )
-                  .slice(0, 3)
-                  .map((item, index) => (
-                    <ReasonItem
-                      key={`support-${index}`}
-                      icon="checkmark-circle-outline"
-                      title={formatSymptom(item)}
-                      subtitle="You told us about this"
-                      positive
-                      colors={colors}
-                    />
-                  ))}
+            <ReasonSummary
+              differentials={
+                differentials
+              }
+              missingSymptoms={
+                missingSymptoms
+              }
+              colors={colors}
+            />
 
-                {(
-                  differentials[0]?.missing_keys || []
-                )
-                  .slice(0, 3)
-                  .map((item, index) => (
-                    <ReasonItem
-                      key={`missing-${index}`}
-                      icon="help-circle-outline"
-                      title={formatSymptom(item)}
-                      subtitle="We are not sure yet"
-                      positive={false}
-                      colors={colors}
-                    />
-                  ))}
-              </>
-            ) : (
-              uncertainty.missing_symptoms
-                ?.slice(0, 4)
-                .map((item, index) => (
-                  <ReasonItem
-                    key={`uncertain-${index}`}
-                    icon="help-circle-outline"
-                    title={formatSymptom(item)}
-                    subtitle="More information could improve confidence"
-                    positive={false}
-                    colors={colors}
-                  />
-                ))
+            {(differentials.some(
+              item =>
+                asArray(
+                  item?.why
+                ).length > 0 ||
+                asArray(
+                  item?.missing_keys
+                ).length > 0
+            ) ||
+              missingSymptoms.length >
+                0) && (
+              <Pressable
+                accessibilityRole="button"
+                onPress={() =>
+                  setShowWhyDetails(
+                    value => !value
+                  )
+                }
+                style={[
+                  styles.expandButton,
+                  {
+                    backgroundColor:
+                      colors.cardAlt,
+
+                    borderColor:
+                      colors.border,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.expandButtonText,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  {showWhyDetails
+                    ? 'Hide detailed reasoning'
+                    : 'View detailed reasoning'}
+                </Text>
+
+                <Ionicons
+                  name={
+                    showWhyDetails
+                      ? 'chevron-up'
+                      : 'chevron-down'
+                  }
+                  size={17}
+                  color={
+                    colors.secondary
+                  }
+                />
+              </Pressable>
+            )}
+
+            {showWhyDetails && (
+              <DetailedReasoning
+                differentials={
+                  differentials
+                }
+                missingSymptoms={
+                  missingSymptoms
+                }
+                colors={colors}
+              />
             )}
           </SectionCard>
         )}
 
-        {/* =====================================================
-            5. WHAT TO DO NEXT
-        ===================================================== */}
+
+        {/* ==================================================
+            NEXT STEPS
+        ================================================== */}
 
         <SectionCard
           colors={colors}
           icon="list-outline"
           title="What to do next"
+          subtitle="Practical next steps based on the current triage level."
         >
-          {nextSteps.map((step, index) => (
-            <StepItem
-              key={index}
-              number={index + 1}
-              text={step}
-              colors={colors}
-            />
-          ))}
+          {nextSteps.map(
+            (step, index) => (
+              <StepItem
+                key={`step-${index}`}
+                number={index + 1}
+                text={step}
+                colors={colors}
+              />
+            )
+          )}
 
-          {result.advice ? (
+          {result?.advice ? (
             <View
               style={[
                 styles.adviceBox,
                 {
-                  backgroundColor: colors.cardAlt,
-                  borderColor: colors.border,
+                  backgroundColor:
+                    colors.cardAlt,
+
+                  borderColor:
+                    colors.border,
                 },
               ]}
             >
-              <Text
-                style={[
-                  styles.adviceLabel,
-                  { color: colors.text },
-                ]}
+              <View
+                style={
+                  styles.adviceHeader
+                }
               >
-                Care advice
-              </Text>
+                <Ionicons
+                  name="heart-outline"
+                  size={17}
+                  color={colors.accent}
+                />
+
+                <Text
+                  style={[
+                    styles.adviceLabel,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  Care guidance
+                </Text>
+              </View>
 
               <Text
                 style={[
-                  styles.bodyText,
-                  { color: colors.secondary },
+                  styles.bodyTextSmall,
+                  {
+                    color:
+                      colors.secondary,
+                  },
                 ]}
               >
-                {result.advice}
+                {String(
+                  result.advice
+                )}
               </Text>
             </View>
           ) : null}
         </SectionCard>
 
-        {/* =====================================================
-            6. EXTRA DETAILS
-        ===================================================== */}
+
+        {/* ==================================================
+            FOLLOW-UP
+        ================================================== */}
+
+        {hasFollowUp && (
+          <SectionCard
+            colors={colors}
+            icon="calendar-outline"
+            title="Follow-up guidance"
+            subtitle="When to reassess or seek more help."
+          >
+            {followUp?.if_not_improved_24h ? (
+              <FollowUpRow
+                icon="time-outline"
+                title="If you are not improving"
+                text={
+                  followUp.if_not_improved_24h
+                }
+                colors={colors}
+              />
+            ) : null}
+
+            {followUp?.if_worsens ? (
+              <FollowUpRow
+                icon="trending-up-outline"
+                title="If symptoms worsen"
+                text={
+                  followUp.if_worsens
+                }
+                colors={colors}
+              />
+            ) : null}
+
+            {followUp?.red_flags ? (
+              <FollowUpRow
+                icon="warning-outline"
+                title="Warning signs"
+                text={
+                  followUp.red_flags
+                }
+                colors={colors}
+                danger
+              />
+            ) : null}
+          </SectionCard>
+        )}
+
+
+        {/* ==================================================
+            EXTRA DETAILS
+        ================================================== */}
 
         {hasExtraDetails && (
-          <TouchableOpacity
-            style={[
-              styles.moreDetailsButton,
-              {
-                backgroundColor: colors.card,
-                borderColor: colors.border,
-              },
-            ]}
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{
+              expanded:
+                showMoreDetails,
+            }}
             onPress={() =>
               setShowMoreDetails(
-                (value) => !value
+                value => !value
               )
             }
-            activeOpacity={0.85}
-          >
-            <View style={styles.moreDetailsLeft}>
-              <Ionicons
-                name="document-text-outline"
-                size={20}
-                color={colors.text}
-              />
+            style={[
+              styles.expandBar,
+              {
+                backgroundColor:
+                  colors.card,
 
-              <Text
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <View
+              style={
+                styles.expandBarLeft
+              }
+            >
+              <View
                 style={[
-                  styles.moreDetailsText,
-                  { color: colors.text },
+                  styles.expandBarIcon,
+                  {
+                    backgroundColor:
+                      colors.accentSoft,
+                  },
                 ]}
               >
-                {showMoreDetails
-                  ? 'Hide extra details'
-                  : 'Show extra details'}
-              </Text>
+                <Ionicons
+                  name="document-text-outline"
+                  size={18}
+                  color={colors.accent}
+                />
+              </View>
+
+              <View>
+                <Text
+                  style={[
+                    styles.expandBarTitle,
+                    {
+                      color:
+                        colors.text,
+                    },
+                  ]}
+                >
+                  Extra safety details
+                </Text>
+
+                <Text
+                  style={[
+                    styles.expandBarSubtitle,
+                    {
+                      color:
+                        colors.muted,
+                    },
+                  ]}
+                >
+                  Medicines, warnings and interactions
+                </Text>
+              </View>
             </View>
 
             <Ionicons
@@ -758,95 +1599,164 @@ export default function HealthRecordDetail({ route, navigation }) {
                   ? 'chevron-up'
                   : 'chevron-down'
               }
-              size={20}
-              color={colors.muted}
+              size={19}
+              color={
+                colors.secondary
+              }
             />
-          </TouchableOpacity>
+          </Pressable>
         )}
 
-        {showMoreDetails && (
-          <>
-            {medicines.length > 0 &&
-              isRoutine && (
-                <SectionCard
-                  colors={colors}
-                  icon="medkit-outline"
-                  title="Medicine information"
-                >
-                  <Text
-                    style={[
-                      styles.smallMuted,
-                      { color: colors.muted },
-                    ]}
-                  >
-                    Only medication information returned
-                    by the clinical system is shown here.
-                  </Text>
 
-                  {medicines.map(
-                    (med, index) => (
+        {showMoreDetails && (
+          <View>
+            {/* MEDICINES */}
+            {medicines.length >
+              0 && (
+              <SectionCard
+                colors={colors}
+                icon="medkit-outline"
+                title="Medication information"
+                subtitle="Only medication information returned by the clinical system is displayed here."
+              >
+                {medicines.map(
+                  (
+                    medicine,
+                    index
+                  ) => {
+                    const name =
+                      medicine?.name ||
+                      medicine?.medicine ||
+                      medicine?.medication ||
+                      'Medication';
+
+                    const dosage =
+                      medicine?.dosage ||
+                      medicine?.dose ||
+                      medicine?.instructions ||
+                      '';
+
+                    return (
                       <View
-                        key={`${med.name}-${index}`}
+                        key={`${String(
+                          name
+                        )}-${index}`}
                         style={[
-                          styles.medicineRow,
+                          styles.medicineCard,
                           {
-                            borderBottomColor:
+                            backgroundColor:
+                              colors.cardAlt,
+
+                            borderColor:
                               colors.border,
                           },
                         ]}
                       >
-                        <Text
+                        <View
                           style={[
-                            styles.medicineName,
-                            { color: colors.text },
-                          ]}
-                        >
-                          {med.name}
-                        </Text>
-
-                        <Text
-                          style={[
-                            styles.medicineDose,
+                            styles.medicineIcon,
                             {
-                              color:
-                                colors.secondary,
+                              backgroundColor:
+                                colors.accentSoft,
                             },
                           ]}
                         >
-                          {med.dosage}
-                        </Text>
-                      </View>
-                    )
-                  )}
-                </SectionCard>
-              )}
+                          <Ionicons
+                            name="medical-outline"
+                            size={19}
+                            color={
+                              colors.accent
+                            }
+                          />
+                        </View>
 
-            {interactions.length > 0 && (
+                        <View
+                          style={
+                            styles.medicineCopy
+                          }
+                        >
+                          <Text
+                            style={[
+                              styles.medicineName,
+                              {
+                                color:
+                                  colors.text,
+                              },
+                            ]}
+                          >
+                            {String(
+                              name
+                            )}
+                          </Text>
+
+                          {dosage ? (
+                            <Text
+                              style={[
+                                styles.medicineDose,
+                                {
+                                  color:
+                                    colors.secondary,
+                                },
+                              ]}
+                            >
+                              {String(
+                                dosage
+                              )}
+                            </Text>
+                          ) : null}
+                        </View>
+                      </View>
+                    );
+                  }
+                )}
+
+                <Text
+                  style={[
+                    styles.medicationSafetyText,
+                    {
+                      color:
+                        colors.muted,
+                    },
+                  ]}
+                >
+                  Do not start, stop or change medicines
+                  based only on this screen. Confirm
+                  medication decisions with a qualified
+                  professional.
+                </Text>
+              </SectionCard>
+            )}
+
+
+            {/* INTERACTIONS */}
+            {interactions.length >
+              0 && (
               <SectionCard
                 colors={colors}
                 icon="warning-outline"
                 title="Medicine safety alerts"
               >
                 {interactions.map(
-                  (item, index) => (
-                    <Text
-                      key={index}
-                      style={[
-                        styles.bodyText,
-                        {
-                          color:
-                            colors.secondary,
-                        },
-                      ]}
-                    >
-                      • {item}
-                    </Text>
+                  (
+                    interaction,
+                    index
+                  ) => (
+                    <InfoBullet
+                      key={`interaction-${index}`}
+                      colors={colors}
+                      text={String(
+                        interaction
+                      )}
+                      danger
+                    />
                   )
                 )}
               </SectionCard>
             )}
 
-            {result.fda_warning ? (
+
+            {/* FDA / MEDICATION WARNING */}
+            {result?.fda_warning ? (
               <SectionCard
                 colors={colors}
                 icon="shield-checkmark-outline"
@@ -854,244 +1764,286 @@ export default function HealthRecordDetail({ route, navigation }) {
               >
                 <Text
                   style={[
-                    styles.bodyText,
+                    styles.bodyTextSmall,
                     {
                       color:
                         colors.secondary,
                     },
                   ]}
                 >
-                  {result.fda_warning}
+                  {String(
+                    result.fda_warning
+                  )}
                 </Text>
               </SectionCard>
             ) : null}
 
-            {warnings.length > 0 && (
+
+            {/* GENERAL WARNINGS */}
+            {warnings.length >
+              0 && (
               <SectionCard
                 colors={colors}
                 icon="alert-circle-outline"
-                title="Safety alerts"
+                title="Safety warnings"
               >
                 {warnings.map(
-                  (warning, index) => (
-                    <Text
-                      key={index}
-                      style={[
-                        styles.bodyText,
-                        {
-                          color:
-                            colors.secondary,
-                        },
-                      ]}
-                    >
-                      • {warning}
-                    </Text>
+                  (
+                    warning,
+                    index
+                  ) => (
+                    <InfoBullet
+                      key={`warning-${index}`}
+                      colors={colors}
+                      text={String(
+                        warning
+                      )}
+                      danger
+                    />
                   )
                 )}
               </SectionCard>
             )}
-          </>
+          </View>
         )}
 
-        {/* =====================================================
-            7. FOLLOW UP
-        ===================================================== */}
 
-        {result.follow_up &&
-          Object.keys(result.follow_up)
-            .length > 0 && (
-            <SectionCard
-              colors={colors}
-              icon="calendar-outline"
-              title="Follow-up"
-            >
-              {result.follow_up
-                .if_not_improved_24h ? (
-                <Text
-                  style={[
-                    styles.bodyText,
-                    {
-                      color:
-                        colors.secondary,
-                      marginBottom: 8,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      fontWeight: '700',
-                      color: colors.text,
-                    }}
-                  >
-                    If not better:{' '}
-                  </Text>
+        {/* ==================================================
+            ACTIONS
+        ================================================== */}
 
-                  {
-                    result.follow_up
-                      .if_not_improved_24h
-                  }
-                </Text>
-              ) : null}
-
-              {result.follow_up.if_worsens ? (
-                <Text
-                  style={[
-                    styles.bodyText,
-                    {
-                      color:
-                        colors.secondary,
-                      marginBottom: 8,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      fontWeight: '700',
-                      color: colors.text,
-                    }}
-                  >
-                    If worse:{' '}
-                  </Text>
-
-                  {result.follow_up.if_worsens}
-                </Text>
-              ) : null}
-
-              {result.follow_up.red_flags ? (
-                <Text
-                  style={[
-                    styles.bodyText,
-                    {
-                      color:
-                        colors.dangerText,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={{
-                      fontWeight: '700',
-                    }}
-                  >
-                    Warning signs:{' '}
-                  </Text>
-
-                  {result.follow_up.red_flags}
-                </Text>
-              ) : null}
-            </SectionCard>
-          )}
-
-        {/* =====================================================
-            REFERENCE
-        ===================================================== */}
-
-        {auditId && (
-          <Text
-            style={[
-              styles.reference,
-              { color: colors.muted },
-            ]}
-          >
-            Reference ID: {auditId}
-          </Text>
-        )}
-
-        {/* =====================================================
-            DOWNLOAD
-        ===================================================== */}
-
-        <TouchableOpacity
-          style={[
-            styles.bottomButton,
-            {
-              backgroundColor: isDark
-                ? '#BDBDBD'
-                : '#3F3F3F',
-            },
-          ]}
-          onPress={handleDownloadPDF}
-          activeOpacity={0.85}
+        <SectionCard
+          colors={colors}
+          icon="folder-open-outline"
+          title="Save or export"
+          subtitle="Keep a copy of your assessment for your records."
         >
-          <Ionicons
-            name="document-text-outline"
-            size={21}
-            color={
-              isDark
-                ? '#303030'
-                : '#FFFFFF'
+          <Pressable
+            accessibilityRole="button"
+            onPress={
+              handleDownloadPDF
             }
-          />
-
-          <Text
-            style={[
-              styles.bottomButtonText,
+            style={({ pressed }) => [
+              styles.primaryAction,
               {
-                color: isDark
-                  ? '#303030'
-                  : '#FFFFFF',
+                backgroundColor:
+                  colors.accent,
+
+                shadowColor:
+                  colors.accent,
+
+                opacity:
+                  pressed
+                    ? 0.82
+                    : 1,
               },
             ]}
           >
-            Download Report
-          </Text>
-        </TouchableOpacity>
+            <View
+              style={
+                styles.primaryActionIcon
+              }
+            >
+              <Ionicons
+                name="document-text-outline"
+                size={18}
+                color="#06110F"
+              />
+            </View>
 
-        {/* =====================================================
-            SAVE
-        ===================================================== */}
+            <View
+              style={
+                styles.primaryActionCopy
+              }
+            >
+              <Text
+                style={
+                  styles.primaryActionTitle
+                }
+              >
+                Download Health Report
+              </Text>
 
-        <TouchableOpacity
-          style={[
-            styles.saveButton,
-            {
-              backgroundColor:
-                colors.card,
-              borderColor:
-                colors.border,
-            },
-          ]}
-          onPress={handleSave}
-          disabled={saved}
-          activeOpacity={0.85}
-        >
-          <Ionicons
-            name={
-              saved
-                ? 'bookmark'
-                : 'bookmark-outline'
-            }
-            size={22}
-            color={
-              saved
-                ? colors.success
-                : colors.text
-            }
-          />
+              <Text
+                style={
+                  styles.primaryActionSubtitle
+                }
+              >
+                Open the detailed PDF report
+              </Text>
+            </View>
 
-          {saved && (
-            <Text
+            <Ionicons
+              name="arrow-forward"
+              size={19}
+              color="#06110F"
+            />
+          </Pressable>
+
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{
+              disabled: saved,
+            }}
+            disabled={saved}
+            onPress={handleSave}
+            style={({ pressed }) => [
+              styles.secondaryAction,
+              {
+                backgroundColor:
+                  colors.cardAlt,
+
+                borderColor:
+                  saved
+                    ? colors.successBorder
+                    : colors.border,
+
+                opacity:
+                  pressed
+                    ? 0.78
+                    : 1,
+              },
+            ]}
+          >
+            <View
               style={[
-                styles.savedText,
+                styles.secondaryActionIcon,
                 {
-                  color:
-                    colors.success,
+                  backgroundColor:
+                    saved
+                      ? colors.successSoft
+                      : colors.iconBg,
                 },
               ]}
             >
-              Saved
-            </Text>
-          )}
-        </TouchableOpacity>
+              <Ionicons
+                name={
+                  saved
+                    ? 'bookmark'
+                    : 'bookmark-outline'
+                }
+                size={18}
+                color={
+                  saved
+                    ? colors.success
+                    : colors.text
+                }
+              />
+            </View>
 
-        <View style={{ height: 22 }} />
-      </ScrollView>
-    </View>
+            <View
+              style={
+                styles.primaryActionCopy
+              }
+            >
+              <Text
+                style={[
+                  styles.secondaryActionTitle,
+                  {
+                    color:
+                      saved
+                        ? colors.successText
+                        : colors.text,
+                  },
+                ]}
+              >
+                {saved
+                  ? 'Assessment Saved'
+                  : 'Save Assessment'}
+              </Text>
+
+              <Text
+                style={[
+                  styles.primaryActionSubtitle,
+                  {
+                    color:
+                      colors.secondary,
+                  },
+                ]}
+              >
+                {saved
+                  ? 'Already stored in your health records'
+                  : 'Keep this assessment in your records'}
+              </Text>
+            </View>
+
+            <Ionicons
+              name={
+                saved
+                  ? 'checkmark-circle'
+                  : 'chevron-forward'
+              }
+              size={19}
+              color={
+                saved
+                  ? colors.success
+                  : colors.muted
+              }
+            />
+          </Pressable>
+        </SectionCard>
+
+
+        {/* ==================================================
+            REFERENCE / FOOTER
+        ================================================== */}
+
+        {auditId && (
+          <View
+            style={[
+              styles.referenceCard,
+              {
+                backgroundColor:
+                  colors.cardAlt,
+
+                borderColor:
+                  colors.border,
+              },
+            ]}
+          >
+            <Ionicons
+              name="finger-print-outline"
+              size={16}
+              color={colors.muted}
+            />
+
+            <Text
+              style={[
+                styles.referenceText,
+                {
+                  color:
+                    colors.muted,
+                },
+              ]}
+              numberOfLines={1}
+            >
+              Assessment reference: {String(
+                auditId
+              )}
+            </Text>
+          </View>
+        )}
+
+
+        <SafetyNotice
+          colors={colors}
+        />
+
+        <View
+          style={{
+            height: 10,
+          }}
+        />
+      </Animated.ScrollView>
+    </SafeAreaView>
   );
 }
 
-/* =============================================================
+
+/* ============================================================
    HEADER
-============================================================= */
+============================================================ */
 
 function Header({
   navigation,
@@ -1104,71 +2056,98 @@ function Header({
         {
           backgroundColor:
             colors.background,
+          borderBottomColor:
+            colors.borderSoft,
         },
       ]}
     >
-      <TouchableOpacity
-        style={[
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel="Go back"
+        onPress={() =>
+          navigation?.canGoBack?.()
+            ? navigation.goBack()
+            : null
+        }
+        style={({ pressed }) => [
           styles.headerButton,
           {
             backgroundColor:
-              colors.iconBg,
+              colors.card,
+
+            borderColor:
+              colors.border,
+
+            opacity:
+              pressed ? 0.72 : 1,
           },
         ]}
-        onPress={() =>
-          navigation.goBack()
-        }
-        activeOpacity={0.8}
-        accessibilityLabel="Go back"
       >
         <Ionicons
           name="arrow-back"
-          size={23}
-          color={colors.text}
-        />
-      </TouchableOpacity>
-
-      <Text
-        style={[
-          styles.headerTitle,
-          {
-            color: colors.text,
-          },
-        ]}
-      >
-        Your Health Result
-      </Text>
-
-      <TouchableOpacity
-        style={[
-          styles.headerButton,
-          {
-            backgroundColor:
-              colors.iconBg,
-          },
-        ]}
-        onPress={() =>
-          Alert.alert(
-            'Share',
-            'Sharing this result will be available soon.'
-          )
-        }
-        activeOpacity={0.8}
-        accessibilityLabel="Share result"
-      >
-        <Ionicons
-          name="share-outline"
           size={21}
           color={colors.text}
         />
-      </TouchableOpacity>
+      </Pressable>
+
+
+      <View
+        style={
+          styles.headerCenter
+        }
+      >
+        <Text
+          style={[
+            styles.headerTitle,
+            {
+              color:
+                colors.text,
+            },
+          ]}
+        >
+          Health Result
+        </Text>
+
+        <Text
+          style={[
+            styles.headerSubtitle,
+            {
+              color:
+                colors.muted,
+            },
+          ]}
+        >
+          CareSense AI assessment
+        </Text>
+      </View>
+
+
+      <View
+        style={[
+          styles.headerBrandIcon,
+          {
+            backgroundColor:
+              colors.accentSoft,
+
+            borderColor:
+              colors.accentBorder,
+          },
+        ]}
+      >
+        <Ionicons
+          name="pulse-outline"
+          size={18}
+          color={colors.accent}
+        />
+      </View>
     </View>
   );
 }
 
-/* =============================================================
+
+/* ============================================================
    SECTION CARD
-============================================================= */
+============================================================ */
 
 function SectionCard({
   colors,
@@ -1184,24 +2163,44 @@ function SectionCard({
         {
           backgroundColor:
             colors.card,
+
           borderColor:
             colors.border,
         },
       ]}
     >
-      <View style={styles.sectionHeader}>
-        <Ionicons
-          name={icon}
-          size={22}
-          color={colors.text}
-        />
+      <View
+        style={
+          styles.sectionHeader
+        }
+      >
+        <View
+          style={[
+            styles.sectionIcon,
+            {
+              backgroundColor:
+                colors.accentSoft,
+            },
+          ]}
+        >
+          <Ionicons
+            name={icon}
+            size={18}
+            color={colors.accent}
+          />
+        </View>
 
-        <View style={{ flex: 1 }}>
+        <View
+          style={
+            styles.sectionHeaderCopy
+          }
+        >
           <Text
             style={[
               styles.sectionTitle,
               {
-                color: colors.text,
+                color:
+                  colors.text,
               },
             ]}
           >
@@ -1229,9 +2228,10 @@ function SectionCard({
   );
 }
 
-/* =============================================================
-   CONDITION
-============================================================= */
+
+/* ============================================================
+   CONDITION ITEM
+============================================================ */
 
 function ConditionItem({
   disease,
@@ -1240,19 +2240,20 @@ function ConditionItem({
   isDark,
   primary,
 }) {
-  const confidence = Math.max(
-    0,
-    Math.min(
-      100,
-      Number(
-        disease.confidence || 0
-      )
-    )
-  );
+  const confidence =
+    clampPercentage(
+      disease?.confidence
+    );
 
   const name =
-    disease.condition ||
-    'Possible condition';
+    humanizeText(
+      disease?.condition
+    ) || 'Possible condition';
+
+  const description =
+    getConditionDescription(
+      disease?.condition
+    );
 
   return (
     <View
@@ -1260,37 +2261,44 @@ function ConditionItem({
         styles.conditionCard,
         {
           backgroundColor:
-            isDark
-              ? '#202020'
-              : '#FAFAFA',
+            colors.cardAlt,
+
           borderColor:
-            colors.border,
+            primary
+              ? colors.accentBorder
+              : colors.border,
         },
       ]}
     >
-      <View style={styles.conditionTop}>
+      <View
+        style={
+          styles.conditionTop
+        }
+      >
         <View
           style={[
-            styles.numberBadge,
+            styles.conditionRank,
             {
               backgroundColor:
                 primary
-                  ? isDark
-                    ? '#5A1823'
-                    : '#FFE0E2'
-                  : isDark
-                    ? '#292929'
-                    : '#F0F0F0',
+                  ? colors.accentSoft
+                  : colors.iconBg,
+
+              borderColor:
+                primary
+                  ? colors.accentBorder
+                  : colors.border,
             },
           ]}
         >
           <Text
             style={[
-              styles.numberBadgeText,
+              styles.conditionRankText,
               {
-                color: primary
-                  ? colors.danger
-                  : colors.muted,
+                color:
+                  primary
+                    ? colors.accentText
+                    : colors.secondary,
               },
             ]}
           >
@@ -1299,10 +2307,9 @@ function ConditionItem({
         </View>
 
         <View
-          style={{
-            flex: 1,
-            marginLeft: 10,
-          }}
+          style={
+            styles.conditionMain
+          }
         >
           <View
             style={
@@ -1319,66 +2326,79 @@ function ConditionItem({
               ]}
               numberOfLines={2}
             >
-              {humanizeCondition(
-                name
-              )}
+              {name}
             </Text>
 
-            <Text
+            <View
               style={[
-                styles.confidence,
+                styles.confidenceBadge,
                 {
-                  color: primary
-                    ? colors.danger
-                    : colors.muted,
+                  backgroundColor:
+                    primary
+                      ? colors.accentSoft
+                      : colors.iconBg,
+
+                  borderColor:
+                    primary
+                      ? colors.accentBorder
+                      : colors.border,
                 },
               ]}
             >
-              {confidence.toFixed(
-                confidence % 1 === 0
-                  ? 0
-                  : 1
-              )}
-              %
-            </Text>
+              <Text
+                style={[
+                  styles.confidenceText,
+                  {
+                    color:
+                      primary
+                        ? colors.accentText
+                        : colors.secondary,
+                  },
+                ]}
+              >
+                {formatConfidence(
+                  confidence
+                )}
+              </Text>
+            </View>
           </View>
 
           <Text
             style={[
-              styles.conditionAlias,
+              styles.conditionDescription,
               {
                 color:
-                  colors.muted,
+                  colors.secondary,
               },
             ]}
           >
-            {getConditionDescription(
-              name
-            )}
+            {description}
           </Text>
         </View>
       </View>
 
       <View
         style={[
-          styles.progressTrack,
+          styles.confidenceTrack,
           {
             backgroundColor:
               isDark
-                ? '#050505'
-                : '#E4E4E4',
+                ? '#1B2432'
+                : '#E9EEF4',
           },
         ]}
       >
         <View
           style={[
-            styles.progressFill,
+            styles.confidenceFill,
             {
-              width: `${confidence}%`,
+              width:
+                `${confidence}%`,
+
               backgroundColor:
                 primary
-                  ? colors.danger
-                  : colors.muted,
+                  ? colors.accent
+                  : colors.secondary,
             },
           ]}
         />
@@ -1387,81 +2407,393 @@ function ConditionItem({
   );
 }
 
-/* =============================================================
-   REASON
-============================================================= */
 
-function ReasonItem({
-  icon,
-  title,
-  subtitle,
-  positive,
+/* ============================================================
+   REASON SUMMARY
+============================================================ */
+
+function ReasonSummary({
+  differentials,
+  missingSymptoms,
   colors,
 }) {
-  return (
-    <View
-      style={[
-        styles.reasonItem,
-        {
-          backgroundColor:
-            positive
-              ? colors.successSoft
-              : colors.cardAlt,
+  const first =
+    differentials[0] ||
+    {};
 
-          borderColor:
-            positive
-              ? '#8ADFC9'
-              : colors.border,
-        },
-      ]}
-    >
-      <Ionicons
-        name={icon}
-        size={22}
-        color={
-          positive
-            ? colors.success
-            : colors.muted
-        }
+  const why =
+    asArray(first?.why)
+      .slice(0, 3);
+
+  const missing =
+    asArray(
+      first?.missing_keys
+    )
+      .slice(0, 3);
+
+  if (
+    why.length === 0 &&
+    missing.length === 0 &&
+    missingSymptoms.length === 0
+  ) {
+    return (
+      <EmptyInlineMessage
+        colors={colors}
+        text="The system did not return additional reasoning details for this assessment."
       />
+    );
+  }
 
-      <View
-        style={{
-          flex: 1,
-          marginLeft: 11,
-        }}
-      >
-        <Text
+  return (
+    <View>
+      {why.length > 0 && (
+        <View
           style={[
-            styles.reasonTitle,
+            styles.reasonSummaryBox,
             {
-              color:
-                colors.text,
+              backgroundColor:
+                colors.successSoft,
+
+              borderColor:
+                colors.successBorder,
             },
           ]}
         >
-          {formatSymptom(title)}
-        </Text>
+          <View
+            style={
+              styles.reasonSummaryHeader
+            }
+          >
+            <Ionicons
+              name="checkmark-circle-outline"
+              size={18}
+              color={colors.success}
+            />
 
-        <Text
+            <Text
+              style={[
+                styles.reasonSummaryTitle,
+                {
+                  color:
+                    colors.successText,
+                },
+              ]}
+            >
+              Supporting information
+            </Text>
+          </View>
+
+          {why.map(
+            (item, index) => (
+              <View
+                key={`why-${index}`}
+                style={
+                  styles.compactReasonRow
+                }
+              >
+                <View
+                  style={[
+                    styles.smallDot,
+                    {
+                      backgroundColor:
+                        colors.success,
+                    },
+                  ]}
+                />
+
+                <Text
+                  style={[
+                    styles.compactReasonText,
+                    {
+                      color:
+                        colors.secondary,
+                    },
+                  ]}
+                >
+                  {humanizeText(
+                    item
+                  )}
+                </Text>
+              </View>
+            )
+          )}
+        </View>
+      )}
+
+
+      {(missing.length > 0 ||
+        missingSymptoms.length > 0) && (
+        <View
           style={[
-            styles.reasonSubtitle,
+            styles.reasonSummaryBox,
             {
-              color:
-                colors.muted,
+              backgroundColor:
+                colors.cardAlt,
+
+              borderColor:
+                colors.border,
             },
           ]}
         >
-          {subtitle}
-        </Text>
-      </View>
+          <View
+            style={
+              styles.reasonSummaryHeader
+            }
+          >
+            <Ionicons
+              name="help-circle-outline"
+              size={18}
+              color={colors.warning}
+            />
+
+            <Text
+              style={[
+                styles.reasonSummaryTitle,
+                {
+                  color:
+                    colors.text,
+                },
+              ]}
+            >
+              Information still uncertain
+            </Text>
+          </View>
+
+          {[
+            ...missing,
+            ...missingSymptoms,
+          ]
+            .filter(Boolean)
+            .slice(0, 5)
+            .map(
+              (item, index) => (
+                <View
+                  key={`unknown-${index}`}
+                  style={
+                    styles.compactReasonRow
+                  }
+                >
+                  <View
+                    style={[
+                      styles.smallDot,
+                      {
+                        backgroundColor:
+                          colors.warning,
+                      },
+                    ]}
+                  />
+
+                  <Text
+                    style={[
+                      styles.compactReasonText,
+                      {
+                        color:
+                          colors.secondary,
+                      },
+                    ]}
+                  >
+                    {humanizeText(
+                      item
+                    )}
+                  </Text>
+                </View>
+              )
+            )}
+        </View>
+      )}
     </View>
   );
 }
 
-/* =============================================================
-   STEP
-============================================================= */
+
+/* ============================================================
+   DETAILED REASONING
+============================================================ */
+
+function DetailedReasoning({
+  differentials,
+  missingSymptoms,
+  colors,
+}) {
+  return (
+    <View
+      style={
+        styles.detailedReasoning
+      }
+    >
+      {differentials.map(
+        (item, index) => {
+          const why =
+            asArray(item?.why);
+
+          const missing =
+            asArray(
+              item?.missing_keys
+            );
+
+          return (
+            <View
+              key={`diff-${index}`}
+              style={[
+                styles.differentialBlock,
+                {
+                  backgroundColor:
+                    colors.cardAlt,
+
+                  borderColor:
+                    colors.border,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.differentialTitle,
+                  {
+                    color:
+                      colors.text,
+                  },
+                ]}
+              >
+                {humanizeText(
+                  item?.condition ||
+                    `Possible condition ${
+                      index + 1
+                    }`
+                )}
+              </Text>
+
+              {why.length > 0 && (
+                <View
+                  style={
+                    styles.detailGroup
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.detailGroupLabel,
+                      {
+                        color:
+                          colors.successText,
+                      },
+                    ]}
+                  >
+                    Supporting signals
+                  </Text>
+
+                  {why.slice(
+                    0,
+                    5
+                  ).map(
+                    (
+                      entry,
+                      itemIndex
+                    ) => (
+                      <InfoBullet
+                        key={`support-${index}-${itemIndex}`}
+                        colors={colors}
+                        text={humanizeText(
+                          entry
+                        )}
+                      />
+                    )
+                  )}
+                </View>
+              )}
+
+              {missing.length > 0 && (
+                <View
+                  style={
+                    styles.detailGroup
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.detailGroupLabel,
+                      {
+                        color:
+                          colors.warningText,
+                      },
+                    ]}
+                  >
+                    Still uncertain
+                  </Text>
+
+                  {missing.slice(
+                    0,
+                    5
+                  ).map(
+                    (
+                      entry,
+                      itemIndex
+                    ) => (
+                      <InfoBullet
+                        key={`missing-${index}-${itemIndex}`}
+                        colors={colors}
+                        text={humanizeText(
+                          entry
+                        )}
+                        warning
+                      />
+                    )
+                  )}
+                </View>
+              )}
+            </View>
+          );
+        }
+      )}
+
+      {missingSymptoms.length >
+        0 && (
+        <View
+          style={[
+            styles.differentialBlock,
+            {
+              backgroundColor:
+                colors.cardAlt,
+
+              borderColor:
+                colors.border,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.differentialTitle,
+              {
+                color:
+                  colors.text,
+              },
+            ]}
+          >
+            Additional information
+          </Text>
+
+          {missingSymptoms.map(
+            (
+              item,
+              index
+            ) => (
+              <InfoBullet
+                key={`extra-${index}`}
+                colors={colors}
+                text={humanizeText(
+                  item
+                )}
+                warning
+              />
+            )
+          )}
+        </View>
+      )}
+    </View>
+  );
+}
+
+
+/* ============================================================
+   STEP ITEM
+============================================================ */
 
 function StepItem({
   number,
@@ -1469,13 +2801,20 @@ function StepItem({
   colors,
 }) {
   return (
-    <View style={styles.stepRow}>
+    <View
+      style={
+        styles.stepRow
+      }
+    >
       <View
         style={[
           styles.stepNumber,
           {
             backgroundColor:
-              colors.iconBg,
+              colors.accentSoft,
+
+            borderColor:
+              colors.accentBorder,
           },
         ]}
       >
@@ -1484,7 +2823,7 @@ function StepItem({
             styles.stepNumberText,
             {
               color:
-                colors.text,
+                colors.accentText,
             },
           ]}
         >
@@ -1507,35 +2846,132 @@ function StepItem({
   );
 }
 
-/* =============================================================
-   BULLET
-============================================================= */
 
-function Bullet({
+/* ============================================================
+   FOLLOW-UP ROW
+============================================================ */
+
+function FollowUpRow({
+  icon,
+  title,
   text,
   colors,
+  danger = false,
 }) {
   return (
     <View
-      style={styles.bulletRow}
+      style={[
+        styles.followUpRow,
+        {
+          backgroundColor:
+            danger
+              ? colors.dangerSoft
+              : colors.cardAlt,
+
+          borderColor:
+            danger
+              ? colors.dangerBorder
+              : colors.border,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.followUpIcon,
+          {
+            backgroundColor:
+              danger
+                ? colors.dangerBorder
+                : colors.accentSoft,
+          },
+        ]}
+      >
+        <Ionicons
+          name={icon}
+          size={17}
+          color={
+            danger
+              ? colors.dangerText
+              : colors.accent
+          }
+        />
+      </View>
+
+      <View
+        style={
+          styles.followUpCopy
+        }
+      >
+        <Text
+          style={[
+            styles.followUpTitle,
+            {
+              color:
+                danger
+                  ? colors.dangerText
+                  : colors.text,
+            },
+          ]}
+        >
+          {title}
+        </Text>
+
+        <Text
+          style={[
+            styles.followUpText,
+            {
+              color:
+                colors.secondary,
+            },
+          ]}
+        >
+          {String(text)}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+
+/* ============================================================
+   INFO BULLET
+============================================================ */
+
+function InfoBullet({
+  text,
+  colors,
+  danger = false,
+  warning = false,
+}) {
+  const bulletColor =
+    danger
+      ? colors.danger
+      : warning
+        ? colors.warning
+        : colors.accent;
+
+  return (
+    <View
+      style={
+        styles.bulletRow
+      }
     >
       <View
         style={[
           styles.bullet,
           {
             backgroundColor:
-              '#7C3AED',
+              bulletColor,
           },
         ]}
       />
 
       <Text
         style={[
-          styles.bodyText,
+          styles.bulletText,
           {
             color:
               colors.secondary,
-            flex: 1,
           },
         ]}
       >
@@ -1545,136 +2981,134 @@ function Bullet({
   );
 }
 
-/* =============================================================
-   HELPERS
-============================================================= */
 
-function humanizeCondition(
-  value
-) {
-  if (!value) {
-    return 'Possible condition';
-  }
+/* ============================================================
+   EMPTY INLINE
+============================================================ */
 
-  return String(value)
-    .replace(/_/g, ' ')
-    .replace(
-      /\b\w/g,
-      (char) =>
-        char.toUpperCase()
-    );
+function EmptyInlineMessage({
+  colors,
+  text,
+}) {
+  return (
+    <View
+      style={[
+        styles.emptyInline,
+        {
+          backgroundColor:
+            colors.cardAlt,
+
+          borderColor:
+            colors.border,
+        },
+      ]}
+    >
+      <Ionicons
+        name="information-circle-outline"
+        size={18}
+        color={colors.muted}
+      />
+
+      <Text
+        style={[
+          styles.emptyInlineText,
+          {
+            color:
+              colors.muted,
+          },
+        ]}
+      >
+        {text}
+      </Text>
+    </View>
+  );
 }
 
-function formatSymptom(
-  value
-) {
-  if (!value) {
-    return 'Symptom';
-  }
 
-  return String(value)
-    .replace(/_/g, ' ')
-    .replace(
-      /\b\w/g,
-      (char) =>
-        char.toUpperCase()
-    );
+/* ============================================================
+   SAFETY NOTICE
+============================================================ */
+
+function SafetyNotice({
+  colors,
+}) {
+  return (
+    <View
+      style={[
+        styles.safetyNotice,
+        {
+          backgroundColor:
+            colors.card,
+
+          borderColor:
+            colors.border,
+        },
+      ]}
+    >
+      <View
+        style={[
+          styles.safetyIcon,
+          {
+            backgroundColor:
+              colors.accentSoft,
+          },
+        ]}
+      >
+        <Ionicons
+          name="shield-checkmark-outline"
+          size={18}
+          color={colors.accent}
+        />
+      </View>
+
+      <View
+        style={
+          styles.safetyCopy
+        }
+      >
+        <Text
+          style={[
+            styles.safetyTitle,
+            {
+              color:
+                colors.text,
+            },
+          ]}
+        >
+          CareSense AI safety note
+        </Text>
+
+        <Text
+          style={[
+            styles.safetyText,
+            {
+              color:
+                colors.secondary,
+            },
+          ]}
+        >
+          This assessment is designed to support
+          decision-making, not replace professional
+          medical care. Get urgent help for emergencies
+          or rapidly worsening symptoms.
+        </Text>
+      </View>
+    </View>
+  );
 }
 
-function getConditionDescription(
-  condition
-) {
-  const normalized =
-    String(condition || '')
-      .toLowerCase();
 
-  if (
-    normalized.includes(
-      'myocardial'
-    ) ||
-    normalized.includes(
-      'heart attack'
-    )
-  ) {
-    return 'Also called a Myocardial Infarction';
-  }
-
-  if (
-    normalized.includes(
-      'chikungunya'
-    )
-  ) {
-    return 'A virus spread by mosquitoes';
-  }
-
-  if (
-    normalized.includes(
-      'dengue'
-    )
-  ) {
-    return 'A mosquito-borne viral infection';
-  }
-
-  if (
-    normalized.includes(
-      'malaria'
-    )
-  ) {
-    return 'A mosquito-borne infection';
-  }
-
-  if (
-    normalized.includes(
-      'influenza'
-    ) ||
-    normalized === 'flu'
-  ) {
-    return 'A common viral respiratory infection';
-  }
-
-  if (
-    normalized.includes(
-      'covid'
-    )
-  ) {
-    return 'A respiratory infection caused by a coronavirus';
-  }
-
-  return 'A possible cause of your symptoms';
-}
-
-/* =============================================================
+/* ============================================================
    STYLES
-============================================================= */
+============================================================ */
 
 const styles = StyleSheet.create({
+  /* ----------------------------------------------------------
+     ROOT
+  ---------------------------------------------------------- */
+
   root: {
     flex: 1,
-  },
-
-  header: {
-    minHeight: 72,
-    paddingHorizontal: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent:
-      'space-between',
-  },
-
-  headerButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent:
-      'center',
-  },
-
-  headerTitle: {
-    flex: 1,
-    fontSize: 23,
-    fontWeight: '800',
-    marginHorizontal: 14,
   },
 
   scroll: {
@@ -1682,173 +3116,499 @@ const styles = StyleSheet.create({
   },
 
   content: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 42,
+    paddingHorizontal: 18,
+    paddingTop: 10,
   },
 
-  /* MAIN ALERT */
 
-  alertCard: {
+  /* ----------------------------------------------------------
+     HEADER
+  ---------------------------------------------------------- */
+
+  header: {
+    minHeight: 72,
+
+    paddingHorizontal: 18,
+
+    flexDirection: 'row',
+    alignItems: 'center',
+
+    borderBottomWidth: 1,
+  },
+
+  headerButton: {
+    width: 44,
+    height: 44,
+
+    borderRadius: 14,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
     borderWidth: 1,
-    borderRadius: 28,
-    padding: 28,
-    marginBottom: 28,
   },
 
-  resultIconRow: {
+  headerCenter: {
+    flex: 1,
+    paddingHorizontal: 13,
+  },
+
+  headerTitle: {
+    fontSize: 19,
+    fontWeight: '800',
+    letterSpacing: -0.2,
+  },
+
+  headerSubtitle: {
+    fontSize: 10.5,
+    marginTop: 2,
+    fontWeight: '600',
+  },
+
+  headerBrandIcon: {
+    width: 44,
+    height: 44,
+
+    borderRadius: 14,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
+    borderWidth: 1,
+  },
+
+
+  /* ----------------------------------------------------------
+     HERO
+  ---------------------------------------------------------- */
+
+  triageHero: {
+    borderWidth: 1,
+    borderRadius: 24,
+
+    padding: 18,
+
+    marginBottom: 16,
+  },
+
+  triageHeroTop: {
     flexDirection: 'row',
     alignItems: 'center',
   },
 
-  resultIcon: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  triageIcon: {
+    width: 58,
+    height: 58,
+
+    borderRadius: 19,
+
     alignItems: 'center',
-    justifyContent:
-      'center',
+    justifyContent: 'center',
   },
 
-  heroText: {
+  triageHeroCopy: {
     flex: 1,
-    marginLeft: 16,
+    marginLeft: 13,
   },
 
-  eyebrow: {
-    fontSize: 15,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    marginBottom: 3,
+  triageBadge: {
+    alignSelf: 'flex-start',
+
+    borderRadius: 999,
+
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+
+    marginBottom: 7,
   },
 
-  heroTitle: {
-    fontSize: 25,
-    lineHeight: 31,
-    fontWeight: '800',
+  triageBadgeText: {
+    color: '#FFFFFF',
+
+    fontSize: 9,
+    fontWeight: '900',
+
+    letterSpacing: 0.9,
   },
 
-  heroDescription: {
-    fontSize: 17,
-    lineHeight: 28,
-    marginTop: 27,
+  triageTitle: {
+    fontSize: 22,
+    lineHeight: 27,
+
+    fontWeight: '850',
+
+    letterSpacing: -0.3,
+  },
+
+  triageDescription: {
+    fontSize: 13.5,
+    lineHeight: 21,
+
+    marginTop: 15,
+  },
+
+  emergencyActions: {
+    marginTop: 15,
+    gap: 9,
   },
 
   emergencyButton: {
-    minHeight: 69,
-    borderRadius: 20,
-    marginTop: 22,
+    minHeight: 62,
+
+    borderRadius: 17,
+
+    paddingHorizontal: 14,
+
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent:
-      'center',
-    gap: 10,
+
+    gap: 11,
   },
 
-  emergencyButtonText: {
+  emergencyButtonCopy: {
+    flex: 1,
+  },
+
+  emergencyButtonTitle: {
     color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '800',
+
+    fontSize: 14,
+    fontWeight: '850',
+  },
+
+  emergencyButtonSubtitle: {
+    color: 'rgba(255,255,255,0.78)',
+
+    fontSize: 10.5,
+
+    marginTop: 2,
   },
 
   understandButton: {
-    minHeight: 62,
+    minHeight: 53,
+
+    borderRadius: 14,
+
     borderWidth: 1,
-    borderRadius: 16,
-    marginTop: 8,
-    paddingHorizontal: 16,
+
+    paddingHorizontal: 12,
+
     flexDirection: 'row',
     alignItems: 'center',
   },
 
   checkbox: {
-    width: 25,
-    height: 25,
+    width: 22,
+    height: 22,
+
+    borderRadius: 7,
+
     borderWidth: 2,
-    borderRadius: 6,
+
     alignItems: 'center',
-    justifyContent:
-      'center',
-    marginRight: 11,
+    justifyContent: 'center',
+
+    marginRight: 9,
   },
 
   understandText: {
-    fontSize: 17,
-    fontWeight: '500',
+    flex: 1,
+
+    fontSize: 11.5,
+    lineHeight: 17,
+
+    fontWeight: '650',
   },
 
-  primaryButton: {
-    minHeight: 60,
-    borderRadius: 18,
-    marginTop: 22,
+
+  /* ----------------------------------------------------------
+     INSUFFICIENT RESULT
+  ---------------------------------------------------------- */
+
+  insufficientHero: {
+    borderWidth: 1,
+    borderRadius: 25,
+
+    padding: 21,
+
+    marginBottom: 16,
+  },
+
+  heroCenter: {
+    alignItems: 'center',
+  },
+
+  insufficientIcon: {
+    width: 72,
+    height: 72,
+
+    borderRadius: 24,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
+    marginBottom: 12,
+  },
+
+  heroBadge: {
+    borderWidth: 1,
+
+    borderRadius: 999,
+
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+
+    marginBottom: 11,
+  },
+
+  heroBadgeText: {
+    fontSize: 8.5,
+    fontWeight: '900',
+    letterSpacing: 0.7,
+  },
+
+  insufficientTitle: {
+    fontSize: 23,
+    lineHeight: 29,
+
+    fontWeight: '850',
+
+    textAlign: 'center',
+    letterSpacing: -0.35,
+  },
+
+  insufficientDescription: {
+    fontSize: 13,
+    lineHeight: 20,
+
+    textAlign: 'center',
+
+    marginTop: 9,
+  },
+
+
+  /* ----------------------------------------------------------
+     PRIMARY ACTION
+  ---------------------------------------------------------- */
+
+  primaryAction: {
+    minHeight: 56,
+
+    borderRadius: 16,
+
+    marginTop: 16,
+
+    paddingHorizontal: 13,
+
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent:
-      'center',
-    gap: 9,
+
+    gap: 10,
+
+    elevation: 4,
+
+    shadowOffset: {
+      width: 0,
+      height: 6,
+    },
+
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
   },
 
-  primaryButtonText: {
-    color: '#FFFFFF',
-    fontSize: 17,
+  primaryActionIcon: {
+    width: 30,
+    height: 30,
+
+    borderRadius: 9,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
+    backgroundColor:
+      'rgba(0,0,0,0.08)',
+  },
+
+  primaryActionCopy: {
+    flex: 1,
+  },
+
+  primaryActionTitle: {
+    color: '#06110F',
+
+    fontSize: 13,
+    fontWeight: '850',
+  },
+
+  primaryActionSubtitle: {
+    color:
+      'rgba(6,17,15,0.66)',
+
+    fontSize: 9.5,
+
+    marginTop: 2,
+  },
+
+  primaryActionText: {
+    color: '#06110F',
+
+    fontSize: 14,
+    fontWeight: '850',
+  },
+
+  secondaryAction: {
+    minHeight: 56,
+
+    borderWidth: 1,
+
+    borderRadius: 16,
+
+    marginTop: 9,
+
+    paddingHorizontal: 13,
+
+    flexDirection: 'row',
+    alignItems: 'center',
+
+    gap: 10,
+  },
+
+  secondaryActionIcon: {
+    width: 32,
+    height: 32,
+
+    borderRadius: 10,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  secondaryActionTitle: {
+    fontSize: 13,
     fontWeight: '800',
   },
 
-  /* CARDS */
+
+  /* ----------------------------------------------------------
+     SECTIONS
+  ---------------------------------------------------------- */
 
   sectionCard: {
     borderWidth: 1,
-    borderRadius: 28,
-    padding: 28,
-    marginBottom: 28,
+
+    borderRadius: 21,
+
+    padding: 16,
+
+    marginBottom: 15,
   },
 
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 20,
-    gap: 11,
+
+    marginBottom: 14,
+  },
+
+  sectionIcon: {
+    width: 38,
+    height: 38,
+
+    borderRadius: 12,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
+    marginRight: 10,
+  },
+
+  sectionHeaderCopy: {
+    flex: 1,
   },
 
   sectionTitle: {
-    fontSize: 21,
-    lineHeight: 27,
-    fontWeight: '800',
+    fontSize: 16,
+    lineHeight: 21,
+
+    fontWeight: '850',
   },
 
   sectionSubtitle: {
-    fontSize: 15,
-    lineHeight: 21,
+    fontSize: 10.5,
+    lineHeight: 16,
+
     marginTop: 3,
   },
 
   bodyText: {
-    fontSize: 17,
-    lineHeight: 28,
+    fontSize: 13.5,
+    lineHeight: 21,
   },
+
+  bodyTextSmall: {
+    fontSize: 12,
+    lineHeight: 19,
+  },
+
+
+  /* ----------------------------------------------------------
+     INFO
+  ---------------------------------------------------------- */
 
   infoBox: {
     borderWidth: 1,
-    borderRadius: 16,
-    padding: 14,
-    marginTop: 18,
+
+    borderRadius: 14,
+
+    padding: 11,
+
+    marginTop: 13,
+
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 10,
+
+    gap: 9,
   },
 
   infoText: {
     flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
+
+    fontSize: 10.5,
+    lineHeight: 16,
   },
 
-  /* CONDITIONS */
+  emptyInline: {
+    borderWidth: 1,
+
+    borderRadius: 13,
+
+    padding: 11,
+
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+
+    gap: 8,
+  },
+
+  emptyInlineText: {
+    flex: 1,
+
+    fontSize: 10.5,
+    lineHeight: 16,
+  },
+
+
+  /* ----------------------------------------------------------
+     CONDITIONS
+  ---------------------------------------------------------- */
 
   conditionCard: {
     borderWidth: 1,
-    borderRadius: 19,
-    padding: 16,
+
+    borderRadius: 16,
+
+    padding: 12,
+
     marginBottom: 9,
   },
 
@@ -1857,224 +3617,504 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
 
-  numberBadge: {
+  conditionRank: {
     width: 31,
     height: 31,
-    borderRadius: 16,
+
+    borderRadius: 10,
+
     alignItems: 'center',
-    justifyContent:
-      'center',
+    justifyContent: 'center',
+
+    borderWidth: 1,
   },
 
-  numberBadgeText: {
-    fontSize: 14,
-    fontWeight: '800',
+  conditionRankText: {
+    fontSize: 12,
+    fontWeight: '900',
+  },
+
+  conditionMain: {
+    flex: 1,
+
+    marginLeft: 9,
   },
 
   conditionNameRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
+
     justifyContent:
       'space-between',
+
     gap: 8,
   },
 
   conditionName: {
     flex: 1,
-    fontSize: 17,
-    lineHeight: 22,
+
+    fontSize: 13.5,
+    lineHeight: 18,
+
     fontWeight: '800',
   },
 
-  confidence: {
-    fontSize: 17,
-    fontWeight: '800',
-  },
-
-  conditionAlias: {
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 5,
-  },
-
-  progressTrack: {
-    height: 12,
-    borderRadius: 7,
-    overflow: 'hidden',
-    marginTop: 14,
-  },
-
-  progressFill: {
-    height: '100%',
-    borderRadius: 7,
-  },
-
-  /* WHY */
-
-  reasonItem: {
-    minHeight: 66,
+  confidenceBadge: {
     borderWidth: 1,
+
+    borderRadius: 999,
+
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+
+  confidenceText: {
+    fontSize: 10,
+
+    fontWeight: '850',
+  },
+
+  conditionDescription: {
+    fontSize: 10.5,
+    lineHeight: 16,
+
+    marginTop: 4,
+  },
+
+  confidenceTrack: {
+    height: 6,
+
+    borderRadius: 999,
+
+    overflow: 'hidden',
+
+    marginTop: 11,
+  },
+
+  confidenceFill: {
+    height: '100%',
+
+    borderRadius: 999,
+  },
+
+
+  /* ----------------------------------------------------------
+     REASON
+  ---------------------------------------------------------- */
+
+  reasonSummaryBox: {
+    borderWidth: 1,
+
     borderRadius: 15,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 8,
+
+    padding: 12,
+
+    marginBottom: 9,
+  },
+
+  reasonSummaryHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+
+    gap: 7,
+
+    marginBottom: 8,
   },
 
-  reasonTitle: {
-    fontSize: 17,
-    fontWeight: '600',
+  reasonSummaryTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
   },
 
-  reasonSubtitle: {
-    fontSize: 14,
-    marginTop: 2,
-  },
-
-  /* NEXT STEPS */
-
-  stepRow: {
+  compactReasonRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 18,
-  },
 
-  stepNumber: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: 'center',
-    justifyContent:
-      'center',
-    marginRight: 14,
-  },
-
-  stepNumberText: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-
-  stepText: {
-    flex: 1,
-    fontSize: 17,
-    lineHeight: 26,
-    paddingTop: 3,
-  },
-
-  adviceBox: {
-    borderWidth: 1,
-    borderRadius: 16,
-    padding: 15,
     marginTop: 5,
   },
 
-  adviceLabel: {
-    fontSize: 16,
-    fontWeight: '800',
-    marginBottom: 5,
+  smallDot: {
+    width: 6,
+    height: 6,
+
+    borderRadius: 3,
+
+    marginTop: 6,
+    marginRight: 8,
   },
 
-  /* EXTRA DETAILS */
+  compactReasonText: {
+    flex: 1,
 
-  moreDetailsButton: {
-    minHeight: 58,
+    fontSize: 10.5,
+    lineHeight: 16,
+  },
+
+  expandButton: {
+    minHeight: 45,
+
     borderWidth: 1,
-    borderRadius: 18,
-    paddingHorizontal: 18,
-    marginBottom: 28,
+
+    borderRadius: 12,
+
+    marginTop: 2,
+
+    paddingHorizontal: 11,
+
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent:
       'space-between',
   },
 
-  moreDetailsLeft: {
+  expandButtonText: {
+    fontSize: 11,
+    fontWeight: '750',
+  },
+
+  detailedReasoning: {
+    marginTop: 10,
+  },
+
+  differentialBlock: {
+    borderWidth: 1,
+
+    borderRadius: 14,
+
+    padding: 12,
+
+    marginBottom: 9,
+  },
+
+  differentialTitle: {
+    fontSize: 12.5,
+
+    fontWeight: '850',
+
+    marginBottom: 7,
+  },
+
+  detailGroup: {
+    marginTop: 7,
+  },
+
+  detailGroupLabel: {
+    fontSize: 10,
+
+    fontWeight: '850',
+
+    marginBottom: 4,
+  },
+
+
+  /* ----------------------------------------------------------
+     STEPS
+  ---------------------------------------------------------- */
+
+  stepRow: {
+    flexDirection: 'row',
+
+    alignItems: 'flex-start',
+
+    marginBottom: 12,
+  },
+
+  stepNumber: {
+    width: 30,
+    height: 30,
+
+    borderRadius: 10,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
+    borderWidth: 1,
+
+    marginRight: 10,
+  },
+
+  stepNumberText: {
+    fontSize: 11,
+    fontWeight: '900',
+  },
+
+  stepText: {
+    flex: 1,
+
+    fontSize: 12.5,
+    lineHeight: 19,
+
+    paddingTop: 4,
+  },
+
+  adviceBox: {
+    borderWidth: 1,
+
+    borderRadius: 14,
+
+    padding: 12,
+
+    marginTop: 3,
+  },
+
+  adviceHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+
+    gap: 7,
+
+    marginBottom: 6,
+  },
+
+  adviceLabel: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+
+
+  /* ----------------------------------------------------------
+     FOLLOW-UP
+  ---------------------------------------------------------- */
+
+  followUpRow: {
+    borderWidth: 1,
+
+    borderRadius: 15,
+
+    padding: 11,
+
+    marginBottom: 8,
+
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+
+  followUpIcon: {
+    width: 31,
+    height: 31,
+
+    borderRadius: 10,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
+    marginRight: 9,
+  },
+
+  followUpCopy: {
+    flex: 1,
+  },
+
+  followUpTitle: {
+    fontSize: 11.5,
+    fontWeight: '800',
+
+    marginBottom: 3,
+  },
+
+  followUpText: {
+    fontSize: 10.5,
+    lineHeight: 16,
+  },
+
+
+  /* ----------------------------------------------------------
+     EXTRA DETAILS
+  ---------------------------------------------------------- */
+
+  expandBar: {
+    minHeight: 61,
+
+    borderWidth: 1,
+
+    borderRadius: 17,
+
+    paddingHorizontal: 12,
+
+    marginBottom: 10,
+
+    flexDirection: 'row',
+    alignItems: 'center',
+
+    justifyContent:
+      'space-between',
+  },
+
+  expandBarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+
     gap: 10,
   },
 
-  moreDetailsText: {
-    fontSize: 16,
-    fontWeight: '700',
+  expandBarIcon: {
+    width: 34,
+    height: 34,
+
+    borderRadius: 11,
+
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
-  medicineRow: {
-    paddingVertical: 13,
-    borderBottomWidth: 1,
+  expandBarTitle: {
+    fontSize: 12.5,
+    fontWeight: '800',
+  },
+
+  expandBarSubtitle: {
+    fontSize: 9.5,
+    marginTop: 2,
+  },
+
+  medicineCard: {
+    borderWidth: 1,
+
+    borderRadius: 15,
+
+    padding: 11,
+
+    marginBottom: 8,
+
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+
+  medicineIcon: {
+    width: 36,
+    height: 36,
+
+    borderRadius: 11,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
+    marginRight: 10,
+  },
+
+  medicineCopy: {
+    flex: 1,
   },
 
   medicineName: {
-    fontSize: 17,
+    fontSize: 12.5,
     fontWeight: '800',
   },
 
   medicineDose: {
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 10.5,
+    lineHeight: 16,
+
     marginTop: 3,
   },
 
-  smallMuted: {
-    fontSize: 13,
-    lineHeight: 19,
-    marginBottom: 10,
+  medicationSafetyText: {
+    fontSize: 9.5,
+    lineHeight: 15,
+
+    marginTop: 5,
   },
 
-  /* BULLETS */
+
+  /* ----------------------------------------------------------
+     BULLETS
+  ---------------------------------------------------------- */
 
   bulletRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 13,
+
+    marginBottom: 8,
   },
 
   bullet: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-    marginTop: 10,
-    marginRight: 11,
+    width: 6,
+    height: 6,
+
+    borderRadius: 3,
+
+    marginTop: 6,
+    marginRight: 8,
   },
 
-  /* BOTTOM */
+  bulletText: {
+    flex: 1,
 
-  reference: {
-    textAlign: 'center',
-    fontSize: 11,
-    marginBottom: 12,
+    fontSize: 10.5,
+    lineHeight: 16,
   },
 
-  bottomButton: {
-    minHeight: 64,
-    borderRadius: 19,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent:
-      'center',
-    gap: 10,
-  },
 
-  bottomButtonText: {
-    fontSize: 18,
-    fontWeight: '800',
-  },
+  /* ----------------------------------------------------------
+     SAFETY NOTICE
+  ---------------------------------------------------------- */
 
-  saveButton: {
-    minHeight: 58,
+  safetyNotice: {
     borderWidth: 1,
+
     borderRadius: 17,
-    marginTop: 14,
-    alignItems: 'center',
-    justifyContent:
-      'center',
+
+    padding: 12,
+
+    marginTop: 1,
+
     flexDirection: 'row',
-    gap: 9,
+    alignItems: 'flex-start',
   },
 
-  savedText: {
-    fontSize: 16,
-    fontWeight: '700',
+  safetyIcon: {
+    width: 34,
+    height: 34,
+
+    borderRadius: 11,
+
+    alignItems: 'center',
+    justifyContent: 'center',
+
+    marginRight: 9,
+  },
+
+  safetyCopy: {
+    flex: 1,
+  },
+
+  safetyTitle: {
+    fontSize: 11.5,
+    fontWeight: '850',
+
+    marginBottom: 3,
+  },
+
+  safetyText: {
+    fontSize: 9.5,
+    lineHeight: 15,
+  },
+
+
+  /* ----------------------------------------------------------
+     REFERENCE
+  ---------------------------------------------------------- */
+
+  referenceCard: {
+    minHeight: 38,
+
+    borderWidth: 1,
+
+    borderRadius: 12,
+
+    paddingHorizontal: 10,
+
+    flexDirection: 'row',
+    alignItems: 'center',
+
+    marginBottom: 10,
+  },
+
+  referenceText: {
+    flex: 1,
+
+    fontSize: 9,
+
+    marginLeft: 7,
   },
 });
